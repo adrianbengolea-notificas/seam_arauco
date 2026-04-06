@@ -71,6 +71,13 @@ export type WorkOrder = {
   updated_at: Timestamp;
 };
 
+export type MaterialNormalizacion =
+  | "pendiente"
+  | "confirmada"
+  | "auto_confirmada"
+  | "revision_pendiente"
+  | "sin_match";
+
 /** Ítem en `work_orders/{id}/materiales_ot` cargado desde campo (schema explícito). */
 export type MaterialOT = {
   id: string;
@@ -82,6 +89,12 @@ export type MaterialOT = {
   creado_at: Timestamp;
   creado_por: string;
   schema_version: 1;
+  catalogo_id?: string;
+  codigo_material?: string;
+  descripcion_match?: string;
+  nombre_normalizado?: string;
+  confianza_ia?: number;
+  normalizacion?: MaterialNormalizacion;
   /**
    * Copia de datos de la OT padre para consultas collectionGroup sin joins.
    * Opcional en documentos históricos (antes de la denormalización).
@@ -199,7 +212,9 @@ export type HistorialEventoTipo =
   | "FIRMA_TECNICO"
   | "FIRMA_USUARIO"
   | "CIERRE"
-  | "INFORME_ACTUALIZADO";
+  | "INFORME_ACTUALIZADO"
+  | "PLANILLA_INICIADA"
+  | "PLANILLA_FIRMADA";
 
 export type WorkOrderHistorialEvent = {
   id: string;

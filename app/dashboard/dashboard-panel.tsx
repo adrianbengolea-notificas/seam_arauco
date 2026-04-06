@@ -4,7 +4,9 @@ import type { ReactNode } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { KNOWN_CENTROS } from "@/lib/config/app-config";
 import { cumplimientoPreventivos, correctivosPorEquipo } from "@/services/kpi";
+import { useMaterialsCatalogLive } from "@/modules/materials/hooks";
 import { useTodaysWorkOrdersCached } from "@/modules/work-orders/hooks";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   Bar,
@@ -82,6 +84,7 @@ export function DashboardPanel() {
   /** `null` = todos los centros (vista general). */
   const [centroFiltro, setCentroFiltro] = useState<string | null>(null);
   const { rows, loading, error } = useTodaysWorkOrdersCached(centroFiltro);
+  const { itemsBajoStock } = useMaterialsCatalogLive(600);
 
   const kpi = useMemo(() => cumplimientoPreventivos(rows), [rows]);
 
@@ -154,7 +157,7 @@ export function DashboardPanel() {
         </p>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard label="Preventivos" hint="Programados vs cerrados a tiempo (ventana ±7 días)" accent="brand">
           <>
             <span className="text-accent-lime">{kpi.cerradosATiempo}</span>
@@ -174,6 +177,18 @@ export function DashboardPanel() {
         >
           <>{rows.length} registros</>
         </StatCard>
+        <Link href="/superadmin/materiales?filter=bajo_stock" className="block rounded-xl outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-brand/40">
+          <StatCard
+            label="Materiales con stock bajo"
+            hint="Catálogo con stock_disponible ≤ stock_minimo"
+            accent={itemsBajoStock.length > 0 ? "brand" : "neutral"}
+          >
+            <span className={itemsBajoStock.length > 0 ? "text-destructive" : undefined}>
+              {itemsBajoStock.length}
+            </span>
+            <span className="ml-2 text-sm font-normal text-muted"> ítems</span>
+          </StatCard>
+        </Link>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">

@@ -7,7 +7,9 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useAssetsLive } from "@/modules/assets/hooks";
 import type { Asset, EspecialidadActivo } from "@/modules/assets/types";
-import { QrCode, Search, X } from "lucide-react";
+import { usePermisos } from "@/lib/permisos/usePermisos";
+import { useAuthUser, useUserProfile } from "@/modules/users/hooks";
+import { Plus, QrCode, Search, X } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
@@ -45,6 +47,9 @@ function assetHaystack(a: Asset): string {
 const ESPECIALIDADES: (EspecialidadActivo | "")[] = ["", "AA", "ELECTRICO", "GG"];
 
 export default function ActivosPage() {
+  const { puede } = usePermisos();
+  const { user, loading: authLoading } = useAuthUser();
+  const { profile, loading: profileLoading } = useUserProfile(user?.uid);
   const { assets, loading, error } = useAssetsLive();
   const [q, setQ] = useState("");
   const [centro, setCentro] = useState("");
@@ -98,6 +103,9 @@ export default function ActivosPage() {
     setEspecialidad("");
   }
 
+  const sessionLoading = authLoading || profileLoading;
+  const canCreateAsset = puede("activos:crear_editar");
+
   return (
     <div className="space-y-8">
       <header>
@@ -111,12 +119,22 @@ export default function ActivosPage() {
               Código, nombre del equipo, ubicación técnica y centro.
             </p>
           </div>
-          <Button asChild className="gap-2 shadow-sm">
-            <Link href="/activos/escaner">
-              <QrCode className="h-4 w-4 opacity-90" aria-hidden />
-              Escanear QR
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {!sessionLoading && canCreateAsset ? (
+              <Button asChild variant="secondary" className="gap-2 shadow-sm">
+                <Link href="/activos/nuevo">
+                  <Plus className="h-4 w-4 opacity-90" aria-hidden />
+                  Nuevo activo
+                </Link>
+              </Button>
+            ) : null}
+            <Button asChild className="gap-2 shadow-sm">
+              <Link href="/activos/escaner">
+                <QrCode className="h-4 w-4 opacity-90" aria-hidden />
+                Escanear QR
+              </Link>
+            </Button>
+          </div>
         </div>
       </header>
       <AssetExcelImportPanel />

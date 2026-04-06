@@ -4,7 +4,7 @@ import { failure, success, type ActionResult } from "@/lib/actions/action-result
 import { verifyIdTokenBasic } from "@/lib/auth/verify-id-token";
 import { AppError, isAppError } from "@/lib/errors/app-error";
 import { getAdminAuth } from "@/firebase/firebaseAdmin";
-import { ensureUserProfileCreated } from "@/modules/users/repository";
+import { ensureUserProfileCreated, syncUserCustomClaims } from "@/modules/users/repository";
 
 function wrap<T>(fn: () => Promise<T>): Promise<ActionResult<T>> {
   return fn()
@@ -34,6 +34,7 @@ export async function actionBootstrapSession(
       email: email ?? record.email ?? "",
       displayName,
     });
+    await syncUserCustomClaims(uid, profile);
     return { rol: profile.rol, display_name: profile.display_name };
   });
 }

@@ -1,11 +1,13 @@
 "use client";
 
+import { iniciarPlanilla } from "@/app/actions/planillas";
 import {
   addMaterialToOT,
   closeWorkOrder,
   updateChecklistItem,
   updateWorkOrderStatus,
 } from "@/app/actions/work-orders";
+import { PlanillaForm } from "@/components/planilla/PlanillaForm";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,10 +15,19 @@ import { useOfflineSync } from "@/hooks/use-offline-sync";
 import { useOnlineStatus } from "@/hooks/use-online";
 import { enqueueOutbox } from "@/lib/offline/ot-db";
 import { cn } from "@/lib/utils";
-import type { MaterialOtListRow } from "@/modules/materials/types";
+import type { MaterialCatalogItem, MaterialOtListRow } from "@/modules/materials/types";
+import { useMaterialSearch, useMaterialsCatalogLive } from "@/modules/materials/hooks";
+import { useCentroConfigLive } from "@/modules/centros/hooks";
+import { rowsToCsv } from "@/lib/csv/escape";
+import { formatFirestoreDate } from "@/lib/pdf/format-firestore-date";
 import { WorkOrderInformeForm } from "@/modules/work-orders/components/WorkOrderInformeForm";
+import { historialEventoResumen, historialEventoTitulo } from "@/modules/work-orders/historial-labels";
 import {
+  useEquipoByCodigo,
+  usePlanillaRespuesta,
+  usePlanillaTemplate,
   useWorkOrderChecklist,
+  useWorkOrderHistorial,
   useWorkOrderLive,
   useWorkOrderMaterials,
 } from "@/modules/work-orders/hooks";
@@ -25,6 +36,8 @@ import {
   workOrderVistaStatus,
   type WorkOrderVistaStatus,
 } from "@/modules/work-orders/types";
+import { planillaProgreso } from "@/lib/planillas/form-utils";
+import { selectTemplate } from "@/lib/planillas/select-template";
 import { SignaturePad } from "@/modules/signatures/components/SignaturePad";
 import { getClientIdToken } from "@/modules/users/hooks";
 import { Download } from "lucide-react";
@@ -55,9 +68,26 @@ function statusBadgeClass(s: WorkOrderVistaStatus): string {
   }
 }
 
+function etiquetaPlanillaTemplate(id: string): string {
+  switch (id) {
+    case "GG":
+      return "GG";
+    case "AA":
+      return "AA";
+    case "ELEC":
+      return "Elec";
+    case "CORRECTIVO":
+      return "Correctivo";
+    default:
+      return id;
+  }
+}
+
 function materialLabel(m: MaterialOtListRow): string {
   if (m._kind === "field") {
-    return `${m.descripcion} · ${m.cantidad} ${m.unidad} (${m.origen})`;
+    const tag = m.normalizacion ? ` · ${m.normalizacion}` : "";
+    const cod = m.codigo_material ? ` · ${m.codigo_material}` : "";
+    return `${m.descripcion} · ${m.cantidad} ${m.unidad} (${m.origen})${cod}${tag}`;
   }
   return `${m.descripcion_snapshot} · ${m.cantidad_consumida} ${m.unidad_medida}`;
 }
@@ -66,6 +96,18 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
   const { workOrder, loading, error } = useWorkOrderLive(workOrderId);
   const { materials, loading: matLoading } = useWorkOrderMaterials(workOrderId);
   const { items: checklistItems, loading: clLoading } = useWorkOrderChecklist(workOrderId);
+  const { events: historialEvents, loading: histLoading } = useWorkOrderHistorial(workOrderId);
+  const { respuesta: planillaResp, loading: planillaLoading } = usePlanillaRespuesta(workOrderId);
+  const planillaTemplateIdEsperado = useMemo(
+    () => (workOrder ? selectTemplate(workOrder) : ""),
+    [workOrder],
+  );
+  const { template: planillaTemplate } = usePlanillaTemplate(
+    planillaResp?.templateId || planillaTemplateIdEsperado || undefined,
+  );
+  const codigoEquipoOt = workOrder?.equipo_codigo?.trim() || workOrder?.codigo_activo_snapshot?.trim();
+  const { equipo: equipoCatalogo } = useEquipoByCodigo(codigoEquipoOt);
+  const { config: centroCfg } = useCentroConfigLive(workOrder?.centro);
   const online = useOnlineStatus();
 
   const [msg, setMsg] = useState<string | null>(null);
@@ -73,11 +115,17 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
   const [sigW, setSigW] = useState(320);
   const sigWrapRef = useRef<HTMLDivElement | null>(null);
 
+  const [planillaOpen, setPlanillaOpen] = useState(false);
+
   const [matOpen, setMatOpen] = useState(false);
   const [matDesc, setMatDesc] = useState("");
   const [matCant, setMatCant] = useState("1");
   const [matUd, setMatUd] = useState("u");
   const [matOrigen, setMatOrigen] = useState<"ARAUCO" | "EXTERNO">("ARAUCO");
+  const [matCatalogPick, setMatCatalogPick] = useState<MaterialCatalogItem | null>(null);
+
+  const { items: catalogItems } = useMaterialsCatalogLive(500);
+  const materialSuggestions = useMaterialSearch(matDesc, catalogItems);
 
   const [fUserName, setFUserName] = useState("");
   const [fTechName, setFTechName] = useState("");
@@ -99,6 +147,11 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
     return () => ro.disconnect();
   }, [cerrarOpen]);
 
+  const planillaProgresoPct = useMemo(() => {
+    if (!planillaTemplate || !planillaResp) return 0;
+    return planillaProgreso(planillaTemplate, planillaResp).pct;
+  }, [planillaTemplate, planillaResp]);
+
   const flushOutbox = useCallback(
     async ({ type, payload }: { type: string; payload: unknown }) => {
       const t = await getClientIdToken();
@@ -118,6 +171,7 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
             unidad: string;
             origen: "ARAUCO" | "EXTERNO";
             observaciones?: string;
+            catalogoIdConfirmado?: string;
           };
         };
         const res = await addMaterialToOT(t, p);
@@ -161,6 +215,25 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
     }
   }
 
+  async function onIniciarPlanilla() {
+    setMsg(null);
+    setPlanillaOpen(true);
+    try {
+      const res = await iniciarPlanilla(await token(), { otId: workOrderId });
+      if (!res.ok) {
+        setPlanillaOpen(false);
+        setMsg(res.error.message);
+        return;
+      }
+      setMsg(
+        res.data.existing ? "Ya tenías una planilla en curso; podés continuar." : "Planilla iniciada.",
+      );
+    } catch (e) {
+      setPlanillaOpen(false);
+      setMsg(e instanceof Error ? e.message : "Error al iniciar planilla");
+    }
+  }
+
   async function toggleCheck(itemId: string, completed: boolean, serverVal: boolean) {
     setMsg(null);
     setLocalCheck((m) => ({ ...m, [itemId]: completed }));
@@ -199,6 +272,7 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
       cantidad: cant,
       unidad: matUd.trim() || "u",
       origen: matOrigen,
+      catalogoIdConfirmado: matCatalogPick?.id,
     };
     try {
       if (online) {
@@ -209,10 +283,12 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
         }
         setMatDesc("");
         setMatCant("1");
+        setMatCatalogPick(null);
         setMatOpen(false);
         setMsg("Material agregado");
       } else {
         await enqueueOutbox("wo_add_material", { workOrderId, material });
+        setMatCatalogPick(null);
         setMatOpen(false);
         setMsg("Sin conexión: material en cola de sincronización.");
       }
@@ -223,16 +299,21 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
 
   async function confirmarCierre() {
     setMsg(null);
-    if (!fUserPad || !fTechPad || !fUserName.trim() || !fTechName.trim()) {
-      setMsg("Completá nombres y ambas firmas");
+    const needUser = centroCfg.requiere_firma_usuario_cierre;
+    if (!fTechPad || !fTechName.trim()) {
+      setMsg("Completá nombre del técnico y su firma");
+      return;
+    }
+    if (needUser && (!fUserPad || !fUserName.trim())) {
+      setMsg("Completá nombre y firma del usuario de planta");
       return;
     }
     try {
       const res = await closeWorkOrder(await token(), {
         workOrderId,
-        firmaUsuario: fUserPad,
+        firmaUsuario: needUser ? (fUserPad ?? "") : "",
         firmaTecnico: fTechPad,
-        firmaUsuarioNombre: fUserName.trim(),
+        firmaUsuarioNombre: needUser ? fUserName.trim() : "",
         firmaTecnicoNombre: fTechName.trim(),
       });
       if (!res.ok) {
@@ -244,6 +325,34 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Error al cerrar");
     }
+  }
+
+  function downloadHistorialCsv() {
+    if (!workOrder) return;
+    const header = ["n_ot", "fecha", "tipo", "titulo", "actor_uid", "resumen", "payload_json"];
+    const dataRows: string[][] = [
+      header,
+      ...historialEvents.map((ev) => [
+        workOrder.n_ot,
+        formatFirestoreDate(ev.created_at),
+        ev.tipo,
+        historialEventoTitulo(ev.tipo),
+        ev.actor_uid,
+        historialEventoResumen(ev),
+        JSON.stringify(ev.payload ?? {}),
+      ]),
+    ];
+    const csv = rowsToCsv(dataRows);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Arauco-Seam-historial-OT-${workOrder.n_ot}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setMsg("CSV de historial descargado");
   }
 
   async function downloadPdf() {
@@ -310,12 +419,18 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
         </p>
       ) : null}
 
-      {cerrada ? (
-        <Button type="button" variant="outline" onClick={() => void downloadPdf()}>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="outline" onClick={() => downloadHistorialCsv()}>
           <Download className="mr-2 h-4 w-4" />
-          Descargar PDF
+          CSV historial
         </Button>
-      ) : null}
+        {cerrada ? (
+          <Button type="button" variant="outline" onClick={() => void downloadPdf()}>
+            <Download className="mr-2 h-4 w-4" />
+            Descargar PDF
+          </Button>
+        ) : null}
+      </div>
 
       <Card>
         <CardHeader>
@@ -337,12 +452,16 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
           </div>
           <div>
             <p className="text-xs font-medium text-zinc-500">Equipo</p>
-            <Link
-              href={`/activos/${workOrder.asset_id}`}
-              className="font-mono text-blue-600 underline dark:text-blue-400"
-            >
-              {workOrder.equipo_codigo ?? workOrder.codigo_activo_snapshot}
-            </Link>
+            {centroCfg.modulos.activos ? (
+              <Link
+                href={`/activos/${workOrder.asset_id}`}
+                className="font-mono text-blue-600 underline dark:text-blue-400"
+              >
+                {workOrder.equipo_codigo ?? workOrder.codigo_activo_snapshot}
+              </Link>
+            ) : (
+              <span className="font-mono">{workOrder.equipo_codigo ?? workOrder.codigo_activo_snapshot}</span>
+            )}
           </div>
           <div>
             <p className="text-xs font-medium text-zinc-500">Ubicación técnica</p>
@@ -370,6 +489,7 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
               key={`${workOrder.id}-${workOrder.updated_at?.toMillis?.() ?? 0}`}
               workOrder={workOrder}
               onMessage={setMsg}
+              iaEnabled={centroCfg.modulos.ia}
             />
           </div>
         </CardContent>
@@ -421,6 +541,71 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
 
       <Card>
         <CardHeader>
+          <CardTitle>Planilla</CardTitle>
+          <CardDescription>
+            {planillaLoading
+              ? "Cargando…"
+              : planillaResp
+                ? `Estado: ${planillaResp.status.replaceAll("_", " ")}`
+                : `Plantilla sugerida: ${etiquetaPlanillaTemplate(planillaTemplateIdEsperado)}`}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          {!planillaResp && !cerrada && vista !== "CANCELADA" ? (
+            <Button type="button" className="min-h-11" onClick={() => void onIniciarPlanilla()}>
+              Iniciar planilla {etiquetaPlanillaTemplate(planillaTemplateIdEsperado)}
+            </Button>
+          ) : null}
+          {planillaResp && planillaResp.status !== "firmada" && !cerrada && vista !== "CANCELADA" ? (
+            <Button
+              type="button"
+              variant="secondary"
+              className="min-h-11"
+              onClick={() => setPlanillaOpen(true)}
+            >
+              Continuar planilla ({planillaProgresoPct}%)
+            </Button>
+          ) : null}
+          {planillaResp?.status === "firmada" ? (
+            <>
+              <p className="w-full text-sm text-zinc-600 dark:text-zinc-400">
+                Planilla firmada ({planillaResp.templateId}).
+              </p>
+              <Button type="button" variant="outline" className="min-h-11" onClick={() => setPlanillaOpen(true)}>
+                Ver planilla completa
+              </Button>
+            </>
+          ) : null}
+          {cerrada || vista === "CANCELADA" ? (
+            <p className="text-sm text-zinc-500">
+              {planillaResp ? "Usá “Ver planilla completa” para consultar." : "No hay planilla registrada."}
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {planillaOpen && workOrder ? (
+        planillaTemplate && planillaResp ? (
+          <PlanillaForm
+            template={planillaTemplate}
+            ot={workOrder}
+            equipo={equipoCatalogo}
+            respuestaInicial={planillaResp}
+            readOnly={planillaResp.status === "firmada" || cerrada || vista === "CANCELADA"}
+            onCerrar={() => setPlanillaOpen(false)}
+          />
+        ) : (
+          <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-2 bg-black/40 px-4 text-center text-white">
+            <p className="text-sm font-medium">Preparando planilla…</p>
+            <Button type="button" variant="secondary" onClick={() => setPlanillaOpen(false)}>
+              Cancelar
+            </Button>
+          </div>
+        )
+      ) : null}
+
+      <Card>
+        <CardHeader>
           <CardTitle>Materiales</CardTitle>
           <CardDescription>{matLoading ? "Cargando…" : `${materials.length} registros`}</CardDescription>
         </CardHeader>
@@ -439,7 +624,46 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
               </Button>
               {matOpen ? (
                 <form onSubmit={(e) => void submitMaterial(e)} className="space-y-2 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-                  <Input value={matDesc} onChange={(e) => setMatDesc(e.target.value)} placeholder="Descripción" />
+                  <div className="relative space-y-1">
+                    <Input
+                      value={matDesc}
+                      onChange={(e) => {
+                        setMatDesc(e.target.value);
+                        setMatCatalogPick(null);
+                      }}
+                      placeholder="Descripción (o elegí del catálogo)"
+                      autoComplete="off"
+                    />
+                    {materialSuggestions.length ? (
+                      <ul className="absolute z-20 mt-0.5 max-h-48 w-full overflow-auto rounded-md border border-zinc-200 bg-white text-sm shadow-md dark:border-zinc-700 dark:bg-zinc-950">
+                        {materialSuggestions.map((it) => (
+                          <li key={it.id}>
+                            <button
+                              type="button"
+                              className="flex w-full flex-col items-start px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-900"
+                              onClick={() => {
+                                setMatCatalogPick(it);
+                                setMatDesc(it.descripcion);
+                                setMatUd(it.unidad_medida || "u");
+                              }}
+                            >
+                              <span className="font-medium text-foreground">{it.descripcion}</span>
+                              <span className="text-xs text-zinc-500">
+                                {it.codigo_material} · Stock: {it.stock_disponible ?? "—"} {it.unidad_medida}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                  {matCatalogPick ? (
+                    <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                      Del catálogo — el stock se actualizará al guardar
+                    </p>
+                  ) : centroCfg.modulos.ia && matDesc.trim().length >= 2 ? (
+                    <p className="text-xs text-zinc-500">La IA intentará mapear el texto al catálogo en segundo plano</p>
+                  ) : null}
                   <div className="grid grid-cols-2 gap-2">
                     <Input value={matCant} onChange={(e) => setMatCant(e.target.value)} placeholder="Cantidad" />
                     <Input value={matUd} onChange={(e) => setMatUd(e.target.value)} placeholder="Unidad" />
@@ -467,6 +691,35 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Historial</CardTitle>
+          <CardDescription>
+            {histLoading ? "Cargando…" : `${historialEvents.length} eventos · sincronizado en vivo`}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {!historialEvents.length && !histLoading ? (
+            <p className="text-sm text-zinc-500">Sin eventos aún.</p>
+          ) : (
+            <ul className="relative space-y-0 border-l-2 border-zinc-200 pl-4 dark:border-zinc-700">
+              {historialEvents.map((ev) => (
+                <li key={ev.id} className="relative pb-6 last:pb-0">
+                  <span className="absolute -left-[9px] top-1.5 h-3 w-3 rounded-full bg-zinc-400 ring-4 ring-white dark:bg-zinc-500 dark:ring-zinc-950" />
+                  <p className="text-xs font-medium text-zinc-500">
+                    {formatFirestoreDate(ev.created_at)} · {historialEventoTitulo(ev.tipo)}
+                  </p>
+                  <p className="mt-0.5 text-sm text-foreground">
+                    {historialEventoResumen(ev) || JSON.stringify(ev.payload ?? {})}
+                  </p>
+                  <p className="mt-0.5 font-mono text-[10px] text-zinc-400">{ev.actor_uid}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
       {cerrarOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-4 sm:items-center">
           <div
@@ -483,20 +736,28 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
             </p>
 
             <div className="mt-4 space-y-3">
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Nombre usuario firmante (conformidad)</label>
-                <Input value={fUserName} onChange={(e) => setFUserName(e.target.value)} autoComplete="name" />
-              </div>
+              {centroCfg.requiere_firma_usuario_cierre ? (
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Nombre usuario firmante (conformidad)</label>
+                  <Input value={fUserName} onChange={(e) => setFUserName(e.target.value)} autoComplete="name" />
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                  Este centro no exige firma del usuario de planta; solo firma del técnico.
+                </p>
+              )}
               <div className="space-y-1">
                 <label className="text-sm font-medium">Nombre del técnico</label>
                 <Input value={fTechName} onChange={(e) => setFTechName(e.target.value)} />
               </div>
 
               <div ref={sigWrapRef} className="space-y-4">
-                <div>
-                  <p className="mb-1 text-sm font-medium">Firma del usuario (conformidad)</p>
-                  <SignaturePad width={sigW} height={160} onChange={setFUserPad} className="max-w-full" />
-                </div>
+                {centroCfg.requiere_firma_usuario_cierre ? (
+                  <div>
+                    <p className="mb-1 text-sm font-medium">Firma del usuario (conformidad)</p>
+                    <SignaturePad width={sigW} height={160} onChange={setFUserPad} className="max-w-full" />
+                  </div>
+                ) : null}
                 <div>
                   <p className="mb-1 text-sm font-medium">Firma del técnico</p>
                   <SignaturePad width={sigW} height={160} onChange={setFTechPad} className="max-w-full" />

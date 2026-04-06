@@ -88,7 +88,7 @@ function origenBadgeClass(origen: "ARAUCO" | "EXTERNO"): string {
 }
 
 export function MaterialesReportingClient() {
-  const { profile, loading: authLoading } = useAuth();
+  const { user, profile, loading: authLoading } = useAuth();
   const [monthStr, setMonthStr] = useState(() => format(new Date(), "yyyy-MM"));
   const [tipo, setTipo] = useState<MaterialesOTFilters["tipo"]>("todos");
   const [esp, setEsp] = useState<MaterialesOTFilters["especialidad"]>("todos");
@@ -121,7 +121,10 @@ export function MaterialesReportingClient() {
     [tipo, esp, origen, desde, hasta, centro],
   );
 
-  const { materiales, totales, loading, error, hitLimit } = useMaterialesOT(filters);
+  const materialesQueryEnabled = Boolean(user) && !authLoading;
+  const { materiales, totales, loading, error, hitLimit } = useMaterialesOT(filters, {
+    enabled: materialesQueryEnabled,
+  });
 
   const pageRows = useMemo(() => {
     const start = page * PAGE_SIZE;
@@ -193,7 +196,14 @@ export function MaterialesReportingClient() {
             <span className="font-medium capitalize text-foreground">{periodoLabel}</span>
           </p>
         </div>
-        <Button type="button" variant="outline" size="sm" className="gap-2" onClick={exportCsv}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-2"
+          disabled={authLoading || loading || Boolean(error) || materiales.length === 0}
+          onClick={exportCsv}
+        >
           <Download className="size-4" />
           Exportar CSV
         </Button>
@@ -205,8 +215,17 @@ export function MaterialesReportingClient() {
           paginación en servidor.
         </p>
       ) : null}
+      {!authLoading && !user ? (
+        <p className="text-sm text-amber-800 dark:text-amber-200">
+          Iniciá sesión para ver el reporting de materiales.
+        </p>
+      ) : null}
       {error ? (
-        <p className="text-sm text-red-600">{error.message}</p>
+        <p className="text-sm text-red-600">
+          {(error as { code?: string }).code === "permission-denied"
+            ? "No tenés permiso para leer materiales de OT o las reglas de Firestore aún no están actualizadas. Si el problema continúa, pedí al admin que despliegue las reglas (`materiales_ot` / collection group)."
+            : error.message}
+        </p>
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

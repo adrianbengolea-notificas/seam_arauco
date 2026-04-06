@@ -37,6 +37,10 @@ export type Aviso = {
   work_order_id?: string;
   prioridad?: "BAJA" | "MEDIA" | "ALTA" | "CRITICA";
   fecha_programada?: Timestamp | null;
+  /** Badge M/T/S/A desde planilla de preventivos (opcional). */
+  frecuencia_plan_mtsa?: "M" | "T" | "S" | "A";
+  /** Estado legible en planillas tipo MENSUALES (p. ej. PDTE). */
+  estado_planilla?: string;
   created_at: Timestamp;
   updated_at: Timestamp;
 };

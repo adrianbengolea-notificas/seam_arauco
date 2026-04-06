@@ -2,8 +2,7 @@
 
 import { failure, success, type ActionResult } from "@/lib/actions/action-result";
 import { AppError, isAppError } from "@/lib/errors/app-error";
-import { requireRole, verifyIdTokenOrThrow } from "@/lib/auth/verify-id-token";
-import { assertUserCanAct } from "@/modules/users/service";
+import { requirePermisoFromToken } from "@/lib/permisos/server";
 import { removeWeekSlot, scheduleWorkOrderInWeek } from "@/modules/scheduling/service";
 import { z } from "zod";
 
@@ -36,9 +35,7 @@ export async function actionScheduleWorkOrderInWeek(
   input: z.infer<typeof scheduleInputSchema>,
 ): Promise<ActionResult<{ slotId: string }>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, ["supervisor", "admin"]);
-    const profile = await assertUserCanAct(session.uid, ["supervisor", "admin"]);
+    const profile = await requirePermisoFromToken(idToken, "programa:crear_ot");
     const parsed = scheduleInputSchema.parse(input);
     const slotId = await scheduleWorkOrderInWeek({
       weekId: parsed.weekId,
@@ -56,9 +53,7 @@ export async function actionRemoveWeekSlot(
   input: z.infer<typeof removeSlotSchema>,
 ): Promise<ActionResult<void>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, ["supervisor", "admin"]);
-    await assertUserCanAct(session.uid, ["supervisor", "admin"]);
+    await requirePermisoFromToken(idToken, "programa:crear_ot");
     const parsed = removeSlotSchema.parse(input);
     await removeWeekSlot({ weekId: parsed.weekId, slotId: parsed.slotId });
   });

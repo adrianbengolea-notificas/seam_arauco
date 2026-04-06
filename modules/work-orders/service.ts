@@ -1,7 +1,14 @@
 import { getAdminDb } from "@/firebase/firebaseAdmin";
 import { AppError } from "@/lib/errors/app-error";
 import { requireAsset } from "@/modules/assets/service";
-import { addMaterialLineAdmin, addMaterialOtFieldAdmin } from "@/modules/materials/repository";
+import { getCentroConfigMergedCached } from "@/modules/centros/config-cache";
+import { scheduleMaterialCatalogMatchAfterCreate } from "@/modules/materials/material-match-scheduler";
+import {
+  addMaterialLineAdmin,
+  addMaterialOtFieldAdmin,
+  applySalidaStockPorOtTransaction,
+  getMaterialCatalogItemAdmin,
+} from "@/modules/materials/repository";
 import type { MaterialLineWorkOrder } from "@/modules/materials/types";
 import { getAvisoById, updateAviso } from "@/modules/notices/repository";
 import { requireAviso } from "@/modules/notices/service";
@@ -18,6 +25,7 @@ import {
 } from "@/modules/work-orders/repository";
 import {
   materialOtDenormFromWorkOrder,
+  type MaterialNormalizacion,
   type ChecklistItem,
   type EvidenciaOT,
   type FirmaDigital,
@@ -382,10 +390,28 @@ export async function addMaterialOtField(input: {
   unidad: string;
   origen: "ARAUCO" | "EXTERNO";
   observaciones?: string;
+  catalogoIdConfirmado?: string;
 }): Promise<string> {
   const wo = await requireWorkOrder(input.workOrderId);
   if (wo.estado !== "EN_EJECUCION" && wo.estado !== "ABIERTA") {
     throw new AppError("CONFLICT", "No se pueden agregar materiales en el estado actual");
+  }
+
+  let normalizacion: MaterialNormalizacion = "pendiente";
+  let catalogo_id: string | undefined;
+  let codigo_material: string | undefined;
+  let descripcion_match: string | undefined;
+
+  const confirmado = input.catalogoIdConfirmado?.trim();
+  if (confirmado) {
+    const mat = await getMaterialCatalogItemAdmin(confirmado);
+    if (!mat || mat.activo === false) {
+      throw new AppError("NOT_FOUND", "Ítem de catálogo inactivo o inexistente");
+    }
+    normalizacion = "confirmada";
+    catalogo_id = mat.id;
+    codigo_material = mat.codigo_material;
+    descripcion_match = mat.descripcion;
   }
 
   const denorm = materialOtDenormFromWorkOrder(wo, input.workOrderId);
@@ -397,8 +423,37 @@ export async function addMaterialOtField(input: {
     observaciones: input.observaciones?.trim(),
     creado_por: input.actorUid,
     schema_version: 1,
+    normalizacion,
+    catalogo_id,
+    codigo_material,
+    descripcion_match,
     ...denorm,
   });
+
+  if (confirmado && catalogo_id && codigo_material && descripcion_match) {
+    await applySalidaStockPorOtTransaction({
+      materialId: catalogo_id,
+      codigoMaterial: codigo_material,
+      descripcionMaterial: descripcion_match,
+      cantidad: input.cantidad,
+      unidad: input.unidad.trim(),
+      otId: input.workOrderId,
+      registradoPorUid: input.actorUid,
+    });
+  } else {
+    const centroCfg = await getCentroConfigMergedCached(wo.centro);
+    if (centroCfg.modulos.ia) {
+      scheduleMaterialCatalogMatchAfterCreate({
+        workOrderId: input.workOrderId,
+        lineId,
+        textoOriginal: input.descripcion.trim(),
+        cantidad: input.cantidad,
+        unidad: input.unidad.trim(),
+        especialidad: wo.especialidad,
+        registradoPorUid: input.actorUid,
+      });
+    }
+  }
 
   await appendHistorialAdmin(input.workOrderId, {
     tipo: "MATERIAL",
@@ -447,27 +502,39 @@ export async function closeWorkOrderWithPadSignatures(input: {
   if (wo.estado !== "ABIERTA" && wo.estado !== "EN_EJECUCION") {
     throw new AppError("CONFLICT", "Solo se puede cerrar con firmas desde ABIERTA o EN_EJECUCION");
   }
+  const cfg = await getCentroConfigMergedCached(wo.centro);
+  const needUserSig = cfg.requiere_firma_usuario_cierre;
   const u = input.firma_usuario_pad.trim();
   const t = input.firma_tecnico_pad.trim();
-  if (u.length < 100 || t.length < 100) {
-    throw new AppError("VALIDATION", "Ambas firmas son obligatorias");
+  if (t.length < 100) {
+    throw new AppError("VALIDATION", "La firma del técnico es obligatoria");
+  }
+  if (needUserSig && u.length < 100) {
+    throw new AppError("VALIDATION", "La firma del usuario de planta es obligatoria");
   }
 
-  await updateWorkOrderDoc(input.workOrderId, {
+  const patch: Record<string, unknown> = {
     estado: "CERRADA",
     fecha_fin_ejecucion: FieldValue.serverTimestamp(),
-    firma_usuario_pad: u,
     firma_tecnico_pad: t,
-    firma_usuario_pad_nombre: input.firma_usuario_nombre.trim(),
     firma_tecnico_pad_nombre: input.firma_tecnico_nombre.trim(),
     firmado_at: FieldValue.serverTimestamp(),
     cerrada_por_uid: input.actorUid,
-  });
+  };
+  if (needUserSig) {
+    patch.firma_usuario_pad = u;
+    patch.firma_usuario_pad_nombre = input.firma_usuario_nombre.trim();
+  } else {
+    patch.firma_usuario_pad = "";
+    patch.firma_usuario_pad_nombre = "";
+  }
+
+  await updateWorkOrderDoc(input.workOrderId, patch);
 
   await appendHistorialAdmin(input.workOrderId, {
     tipo: "CIERRE",
     actor_uid: input.actorUid,
-    payload: { modo: "pad_dual" },
+    payload: { modo: needUserSig ? "pad_dual" : "pad_tecnico" },
   });
 }
 

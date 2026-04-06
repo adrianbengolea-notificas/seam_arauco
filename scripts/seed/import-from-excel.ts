@@ -1,7 +1,7 @@
 /**
  * Seed / import masivo desde Excel en `scripts/seed/data/` hacia Firestore.
  *
- * La app usa la colección `assets` (no `equipos`). Los avisos siguen `modules/notices/types`.
+ * Escribe `equipos/` (catálogo Excel), `assets/` (compat app), `avisos/` (`modules/notices/types`).
  *
  *   npm run seed:import
  *
@@ -12,7 +12,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { getAdminDb } from "@/firebase/firebaseAdmin";
 import { deriveCentroPlantCodeFromUbicacionTecnica } from "@/lib/firestore/derive-centro";
-import { ASSETS_COLLECTION, AVISOS_COLLECTION } from "@/lib/firestore/collections";
+import { ASSETS_COLLECTION, AVISOS_COLLECTION, EQUIPOS_COLLECTION } from "@/lib/firestore/collections";
 import {
   commitAssetsImportRows,
   parseAssetsWorkbook,
@@ -56,10 +56,20 @@ function mapEspecialidad(raw: string): Especialidad {
 
 function mapFrecuenciaFromSheet(sheetName: string): FrecuenciaMantenimiento | null {
   const n = normHeader(sheetName);
-  if (n.includes("anual") && !n.includes("semest")) return "ANUAL";
   if (n.includes("semestral")) return "SEMESTRAL";
+  if (n.includes("anual") && !n.includes("semest")) return "ANUAL";
   if (n.includes("trim")) return "TRIMESTRAL";
   if (n.startsWith("men") || n.includes("mensual")) return "MENSUAL";
+  return null;
+}
+
+/** Badge M/T/S/A alineado a las hojas del Excel de preventivos. */
+function mapMtsaFromSheetName(sheetName: string): "M" | "T" | "S" | "A" | null {
+  const n = normHeader(sheetName);
+  if (n.includes("semestral")) return "S";
+  if (n.includes("anual") && !n.includes("semest")) return "A";
+  if (n.includes("trim")) return "T";
+  if (n.startsWith("men") || n.includes("mensual")) return "M";
   return null;
 }
 
@@ -88,6 +98,13 @@ function mapEstadoUsuario(statusRaw: string): EstadoAviso | null {
   if (u.includes("curso") || u.includes("proce")) return "OT_GENERADA";
   if (u.includes("compl") || u.includes("cerr") || u.includes("realiz")) return "CERRADO";
   if (u.includes("cancel") || u.includes("anul")) return "ANULADO";
+  return null;
+}
+
+function mapEstadoPlanilla(statusRaw: string): string | null {
+  const u = normHeader(statusRaw);
+  if (!u) return null;
+  if (u.includes("pdte") || (u.includes("pend") && u.includes("iente"))) return "PDTE";
   return null;
 }
 
@@ -120,6 +137,137 @@ function col(h: Map<string, number>, ...keys: string[]): number | undefined {
     }
   }
   return undefined;
+}
+
+async function commitEquiposBatchMerge(
+  payloads: Array<{ id: string; data: Record<string, unknown> }>,
+  label: string,
+) {
+  const db = getAdminDb();
+  const collection = db.collection(EQUIPOS_COLLECTION);
+  const chunkSize = 450;
+  const getChunk = 10;
+  let done = 0;
+
+  for (let i = 0; i < payloads.length; i += chunkSize) {
+    const chunk = payloads.slice(i, i + chunkSize);
+    const refs = chunk.map((p) => collection.doc(p.id));
+    const snapsMap = new Map<string, DocumentSnapshot>();
+    for (let j = 0; j < refs.length; j += getChunk) {
+      const slice = refs.slice(j, j + getChunk);
+      const snaps = await db.getAll(...slice);
+      for (const s of snaps) snapsMap.set(s.ref.id, s);
+    }
+    const batch = db.batch();
+    for (let k = 0; k < chunk.length; k++) {
+      const { id, data } = chunk[k];
+      const snap = snapsMap.get(id)!;
+      const base = {
+        ...data,
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+      if (!snap.exists) {
+        (base as Record<string, unknown>).createdAt = FieldValue.serverTimestamp();
+      }
+      batch.set(refs[k], base, { merge: true });
+    }
+    await batch.commit();
+    done += chunk.length;
+    process.stdout.write(`\r${label} ${done}/${payloads.length} ✓`);
+  }
+  console.log("");
+}
+
+function equipoDocId(codigoRaw: string): string {
+  return str(codigoRaw)
+    .replace(/[/\\]/g, "-")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+/** Importa hojas a colección `equipos` (merge, no pisar campos arbitrarios). */
+async function importEquiposColeccion(): Promise<number> {
+  const file = resolveDataPath(DATA_FILES.equipos);
+  if (!file) {
+    console.warn(`   Omitido equipos/: no está ${DATA_FILES.equipos} en scripts/seed/data/`);
+    return 0;
+  }
+
+  const wb = XLSX.readFile(file);
+  const out: Array<{ id: string; data: Record<string, unknown> }> = [];
+
+  for (const sheetName of wb.SheetNames) {
+    const sh = wb.Sheets[sheetName]!;
+    const n = normHeader(sheetName);
+    const isAA = n.includes("aires") && n.includes("acond");
+    const isGG = n.includes("grupo") && n.includes("gener");
+
+    if (!isAA && !isGG) continue;
+
+    const matrix = sheetMatrix(sh);
+    const headerKeys = isAA
+      ? ["nueva ut", "nuevo codigo", "descripcion"]
+      : ["ubicacion tecnica", "codigo del equipo", "detalle"];
+    const hr = findHeaderRowByKeys(matrix, headerKeys, 45);
+    if (hr < 0) {
+      console.warn(`\n   ⚠ Hoja «${sheetName}»: sin encabezados esperados para equipos`);
+      continue;
+    }
+    const h = headerIndexMap(matrix[hr]!);
+
+    const iUt = col(h, "nueva ut", "ubicacion tecnica", "ubicación técnica");
+    const iCod = col(
+      h,
+      "nuevo codigo",
+      "codigo del equipo",
+      "codigo equipo",
+    );
+    const iDesc = col(h, "descripcion", "detalle del equipo", "detalle");
+    const iOld = col(h, "codigo viejo", "codigo viejo");
+
+    if (iUt === undefined || iCod === undefined || iDesc === undefined) {
+      console.warn(`\n   ⚠ Hoja «${sheetName}»: columnas incompletas (equipos)`);
+      continue;
+    }
+
+    const esp: "A" | "GG" = isAA ? "A" : "GG";
+
+    for (let r = hr + 1; r < matrix.length; r++) {
+      const line = matrix[r] ?? [];
+      const codigo = str(line[iCod]);
+      const ut = str(line[iUt]);
+      const descripcion = str(line[iDesc]);
+      const codigoViejo = iOld !== undefined ? str(line[iOld]) : "";
+      if (!codigo && !ut && !descripcion) continue;
+      if (!codigo) continue;
+
+      const id = equipoDocId(codigo);
+      if (!id) continue;
+
+      out.push({
+        id,
+        data: {
+          id,
+          codigo,
+          codigoViejo,
+          descripcion,
+          ubicacionTecnica: ut,
+          denomUbicTecnica: "",
+          especialidad: esp,
+          centro: deriveCentroPlantCodeFromUbicacionTecnica(ut),
+        },
+      });
+    }
+  }
+
+  if (!out.length) {
+    console.log("0 (sin filas en hojas Aires Acondicionado / Grupos Generadores)");
+    return 0;
+  }
+
+  await commitEquiposBatchMerge(out, "Importando equipos…");
+  console.log(`   Equipos (colección ${EQUIPOS_COLLECTION}): ${out.length}`);
+  return out.length;
 }
 
 async function commitAvisoBatchMerge(
@@ -156,18 +304,19 @@ async function commitAvisoBatchMerge(
     }
     await batch.commit();
     done += chunk.length;
-    process.stdout.write(`\r   ${label} ${done}/${payloads.length} ✓`);
+    process.stdout.write(`\r${label} ${done}/${payloads.length} ✓`);
   }
   console.log("");
 }
 
-async function importEquipos(): Promise<number> {
+async function importActivosDesdeExcelEquipos(): Promise<number> {
   const file = resolveDataPath(DATA_FILES.equipos);
   if (!file) {
     console.warn(`   Omitido: no está ${DATA_FILES.equipos} en scripts/seed/data/`);
     return 0;
   }
-  logStep(`Importando equipos → ${ASSETS_COLLECTION} (${path.basename(file)})`);
+  logStep(`Importando filas de equipos → ${ASSETS_COLLECTION} (${path.basename(file)})`);
+  process.stdout.write("Importando activos (assets)… ");
   const wb = XLSX.readFile(file);
   const { rows, warnings } = parseAssetsWorkbook(wb, "PC01");
   for (const w of warnings) console.warn(`   ⚠ ${w}`);
@@ -176,11 +325,11 @@ async function importEquipos(): Promise<number> {
     centro: deriveCentroPlantCodeFromUbicacionTecnica(r.ubicacion_tecnica),
   }));
   if (!derived.length) {
-    console.log("   Sin filas de equipos.");
+    console.log("0 (parseAssetsWorkbook sin filas)");
     return 0;
   }
   await commitAssetsImportRows(derived);
-  console.log(`   Equipos importados (merge): ${derived.length}`);
+  console.log(`   Activos (${ASSETS_COLLECTION}): ${derived.length}`);
   return derived.length;
 }
 
@@ -205,6 +354,7 @@ async function importPreventivos(utToAsset: Map<string, string>): Promise<number
     return 0;
   }
   logStep(`Importando avisos preventivos (${path.basename(file)})`);
+  process.stdout.write("Importando preventivos… ");
   const wb = XLSX.readFile(file);
   const out: Array<{ id: string; data: Record<string, unknown> }> = [];
   let skipped = 0;
@@ -212,6 +362,7 @@ async function importPreventivos(utToAsset: Map<string, string>): Promise<number
 
   for (const sheetName of wb.SheetNames) {
     const freq = mapFrecuenciaFromSheet(sheetName);
+    const mtsa = mapMtsaFromSheetName(sheetName);
     if (!freq) continue;
     const sh = wb.Sheets[sheetName]!;
     const matrix = sheetMatrix(sh);
@@ -252,7 +403,7 @@ async function importPreventivos(utToAsset: Map<string, string>): Promise<number
         continue;
       }
       const id = avisoDocId(numero);
-      const payload: AvisoPayload = {
+      const payload: AvisoPayload & { frecuencia_plan_mtsa?: "M" | "T" | "S" | "A" } = {
         n_aviso: numero,
         asset_id: assetId,
         ubicacion_tecnica: ut,
@@ -265,6 +416,7 @@ async function importPreventivos(utToAsset: Map<string, string>): Promise<number
         estado: "ABIERTO",
         fecha_programada: null,
       };
+      if (mtsa) payload.frecuencia_plan_mtsa = mtsa;
       if (denom) {
         payload.texto_largo = [denom, payload.texto_largo].filter(Boolean).join(" — ") || undefined;
       }
@@ -272,7 +424,7 @@ async function importPreventivos(utToAsset: Map<string, string>): Promise<number
     }
   }
 
-  if (out.length) await commitAvisoBatchMerge(out, "Preventivos");
+  if (out.length) await commitAvisoBatchMerge(out, "Importando preventivos…");
   if (skipped) console.log(`   Sin número de aviso: ${skipped}`);
   if (skipNoAsset) console.log(`   Sin activo para la UT (importá equipos o revisá UT): ${skipNoAsset}`);
   return out.length;
@@ -285,6 +437,7 @@ async function importCorrectivos(utToAsset: Map<string, string>): Promise<number
     return 0;
   }
   logStep(`Importando avisos correctivos (${path.basename(file)})`);
+  process.stdout.write("Importando correctivos… ");
   const wb = XLSX.readFile(file);
   const sh = wb.Sheets[wb.SheetNames[0]!] ?? wb.Sheets["Hoja1"];
   if (!sh) {
@@ -348,7 +501,7 @@ async function importCorrectivos(utToAsset: Map<string, string>): Promise<number
     };
     out.push({ id, data: { ...payload } });
   }
-  if (out.length) await commitAvisoBatchMerge(out, "Correctivos");
+  if (out.length) await commitAvisoBatchMerge(out, "Importando correctivos…");
   if (skipped) console.log(`   Omitidos: ${skipped}`);
   return out.length;
 }
@@ -394,7 +547,7 @@ async function commitPatchesOnlyExisting(
     }
     if (ops) await batch.commit();
     done += chunk.length;
-    process.stdout.write(`\r   ${label} revisados ${done}/${patches.length}`);
+    process.stdout.write(`\r${label} ${done}/${patches.length} ✓`);
   }
   if (skipped) console.log(`   · Sin documento previo (no se crea parche): ${skipped}`);
 }
@@ -433,8 +586,11 @@ async function importMensualesMerge(): Promise<number> {
     const id = avisoDocId(numero);
     const patch: Record<string, unknown> = {};
     if (iStatus !== undefined) {
-      const st = mapEstadoUsuario(str(line[iStatus]));
+      const rawSt = str(line[iStatus]);
+      const st = mapEstadoUsuario(rawSt);
+      const planilla = mapEstadoPlanilla(rawSt);
       if (st) patch.estado = st;
+      if (planilla) patch.estado_planilla = planilla;
     }
     if (iCePl !== undefined) {
       const ce = str(line[iCePl]);
@@ -447,7 +603,10 @@ async function importMensualesMerge(): Promise<number> {
     if (Object.keys(patch).length) out.push({ id, data: patch });
   }
 
-  if (out.length) await commitPatchesOnlyExisting(out, "Mensuales merge");
+  if (out.length) {
+    process.stdout.write("Enriqueciendo desde mensuales… ");
+    await commitPatchesOnlyExisting(out, "Enriqueciendo desde mensuales…");
+  }
   return out.length;
 }
 
@@ -457,7 +616,8 @@ async function main() {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
 
-  const nEq = await importEquipos();
+  const nEquiposCat = await importEquiposColeccion();
+  const nEq = await importActivosDesdeExcelEquipos();
   logStep("Construyendo mapa UT → asset_id");
   const utToAsset = await loadUbicacionToAssetId();
   console.log(`   Ubicaciones únicas con activo: ${utToAsset.size}`);
@@ -467,7 +627,8 @@ async function main() {
   const nM = await importMensualesMerge();
 
   console.log("\n── Resumen ──");
-  console.log(`   Equipos (assets):     ${nEq}`);
+  console.log(`   Catálogo equipos:     ${nEquiposCat}`);
+  console.log(`   Activos (assets):     ${nEq}`);
   console.log(`   Avisos preventivos:   ${nP}`);
   console.log(`   Avisos correctivos:   ${nC}`);
   console.log(`   Parches mensuales:    ${nM}`);

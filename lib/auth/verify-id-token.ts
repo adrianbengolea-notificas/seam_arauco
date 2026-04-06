@@ -1,6 +1,7 @@
 import { getAdminAuth } from "@/firebase/firebaseAdmin";
 import { AppError } from "@/lib/errors/app-error";
 import { getUserProfileByUid } from "@/modules/users/repository";
+import { roleSatisfiesAllowed } from "@/modules/users/roles";
 import type { UserRole } from "@/modules/users/types";
 
 export type VerifiedSession = {
@@ -49,7 +50,7 @@ export async function verifyIdTokenOrThrow(idToken: string | undefined): Promise
 }
 
 export function requireRole(session: VerifiedSession, allowed: readonly UserRole[]): void {
-  if (!allowed.includes(session.role)) {
+  if (!roleSatisfiesAllowed(session.role, allowed)) {
     throw new AppError("FORBIDDEN", "Permisos insuficientes para esta operación");
   }
 }

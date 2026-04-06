@@ -2,7 +2,12 @@ import React from "react";
 import { NextRequest, NextResponse } from "next/server";
 import { renderToStream } from "@react-pdf/renderer";
 import { verifyIdTokenOrThrow } from "@/lib/auth/verify-id-token";
-import { getWorkOrderById } from "@/modules/work-orders/repository";
+import {
+  getPlanillaTemplateAdmin,
+  getSignedPlanillaRespuestaAdmin,
+  getWorkOrderById,
+  listHistorialAdmin,
+} from "@/modules/work-orders/repository";
 import { listMaterialesOtAdmin } from "@/modules/materials/repository";
 import { WorkOrderPdfDocument } from "@/modules/work-orders/pdf/WorkOrderPdfDocument";
 
@@ -26,12 +31,22 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   }
 
   const materiales = await listMaterialesOtAdmin(id);
+  const historial = await listHistorialAdmin(id);
+
+  const planillaRespuesta = await getSignedPlanillaRespuestaAdmin(id);
+  const planillaTemplate = planillaRespuesta
+    ? await getPlanillaTemplateAdmin(planillaRespuesta.templateId)
+    : null;
 
   try {
     const stream = await renderToStream(
-      React.createElement(WorkOrderPdfDocument, { workOrder, materiales }) as Parameters<
-        typeof renderToStream
-      >[0],
+      React.createElement(WorkOrderPdfDocument, {
+        workOrder,
+        materiales,
+        historial,
+        planillaTemplate,
+        planillaRespuesta,
+      }) as Parameters<typeof renderToStream>[0],
     );
 
     return new NextResponse(stream as unknown as ReadableStream, {

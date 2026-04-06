@@ -1,12 +1,15 @@
 "use client";
 
 import { getFirebaseDb } from "@/firebase/firebaseClient";
+import { COLLECTIONS } from "@/lib/firestore/collections";
 import type {
   MaterialCatalogItem,
   MaterialOTConsumoRow,
   MaterialesOTFilters,
   MaterialesOTTotales,
+  StockMovimiento,
 } from "@/modules/materials/types";
+import type { MaterialNormalizacion } from "@/modules/work-orders/types";
 import {
   collection,
   collectionGroup,
@@ -21,6 +24,21 @@ import {
 } from "firebase/firestore";
 import { endOfDay, endOfMonth, startOfDay, startOfMonth } from "date-fns";
 import { useEffect, useMemo, useState } from "react";
+
+export type MaterialOtNormRow = {
+  otId: string;
+  lineId: string;
+  descripcion: string;
+  cantidad: number;
+  unidad: string;
+  normalizacion?: MaterialNormalizacion;
+  catalogo_id?: string;
+  codigo_material?: string;
+  descripcion_match?: string;
+  confianza_ia?: number;
+  nombre_normalizado?: string;
+  creado_at?: Timestamp;
+};
 
 /** Nombre real de la subcolección en Firestore (`work_orders/{id}/materiales_ot`). Equivale al "materials_ot" del diseño. */
 const MATERIALES_OT_GROUP = "materiales_ot";
@@ -144,7 +162,10 @@ function computeTotales(rows: MaterialOTConsumoRow[]): MaterialesOTTotales {
  * Materiales consumidos en OTs (collectionGroup `materiales_ot`, ítems schema v1).
  * Consulta por rango de `creado_at`; el resto de filtros se aplica en cliente.
  */
-export function useMaterialesOT(filters: MaterialesOTFilters): {
+export function useMaterialesOT(
+  filters: MaterialesOTFilters,
+  options?: { enabled?: boolean },
+): {
   materiales: MaterialOTConsumoRow[];
   totales: MaterialesOTTotales;
   loading: boolean;
@@ -152,6 +173,7 @@ export function useMaterialesOT(filters: MaterialesOTFilters): {
   /** True si el snapshot alcanzó el límite interno (convendría acotar fechas o paginar en servidor). */
   hitLimit: boolean;
 } {
+  const enabled = options?.enabled !== false;
   const [raw, setRaw] = useState<MaterialOTConsumoRow[]>([]);
   const [hitLimit, setHitLimit] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -162,6 +184,14 @@ export function useMaterialesOT(filters: MaterialesOTFilters): {
   const fKey = materialesFiltersKey(filters);
 
   useEffect(() => {
+    if (!enabled) {
+      setRaw([]);
+      setHitLimit(false);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const db = getFirebaseDb();
     const desde = startOfDay(filters.desde ?? startOfMonth(new Date()));
     const hasta = endOfDay(filters.hasta ?? endOfMonth(new Date()));
@@ -198,7 +228,7 @@ export function useMaterialesOT(filters: MaterialesOTFilters): {
 
     return () => unsub();
     // Solo el mismo rango de fechas debe reabrir la suscripción; el resto se filtra en cliente.
-  }, [desdeTs, hastaTs]);
+  }, [desdeTs, hastaTs, enabled]);
 
   const materiales = useMemo(() => applyMaterialesFilters(raw, filters), [raw, fKey]);
   const totales = useMemo(() => computeTotales(materiales), [materiales]);
@@ -208,6 +238,7 @@ export function useMaterialesOT(filters: MaterialesOTFilters): {
 
 export function useMaterialsCatalogLive(max: number = 500): {
   items: MaterialCatalogItem[];
+  itemsBajoStock: MaterialCatalogItem[];
   loading: boolean;
   error: Error | null;
 } {
@@ -235,5 +266,180 @@ export function useMaterialsCatalogLive(max: number = 500): {
     return () => unsub();
   }, [max]);
 
-  return { items, loading, error };
+  const itemsBajoStock = useMemo(() => {
+    return items.filter((it) => {
+      if (it.stock_minimo == null || it.stock_minimo === undefined) return false;
+      const s = it.stock_disponible ?? 0;
+      return s <= it.stock_minimo;
+    });
+  }, [items]);
+
+  return { items, itemsBajoStock, loading, error };
+}
+
+/** Sugerencias de catálogo sobre datos ya cargados (debounce 250 ms, mín. 2 caracteres). */
+export function useMaterialSearch(
+  rawQuery: string,
+  catalogItems: MaterialCatalogItem[],
+  _especialidad?: string,
+): MaterialCatalogItem[] {
+  const [debounced, setDebounced] = useState("");
+  useEffect(() => {
+    const q = rawQuery.trim();
+    if (q.length < 2) {
+      setDebounced("");
+      return;
+    }
+    const t = setTimeout(() => setDebounced(q), 250);
+    return () => clearTimeout(t);
+  }, [rawQuery]);
+
+  return useMemo(() => {
+    if (debounced.length < 2) return [];
+    const d = debounced.toLowerCase();
+    return catalogItems
+      .filter((it) => it.activo !== false)
+      .filter(
+        (it) =>
+          it.descripcion.toLowerCase().includes(d) || it.codigo_material.toLowerCase().includes(d),
+      )
+      .slice(0, 5);
+  }, [catalogItems, debounced]);
+}
+
+export function useStockMovimientos(
+  materialId: string | undefined,
+  authUid: string | undefined,
+  options?: {
+    /** Acota movimientos al almacén / centro del catálogo (campo denormalizado en el doc). */
+    filterCentro?: string;
+    /** Si true, incluye movimientos sin `centro_almacen` (datos previos a la denormalización). */
+    includeLegacySinCentro?: boolean;
+  },
+): {
+  movimientos: StockMovimiento[];
+  loading: boolean;
+  error: Error | null;
+} {
+  const [movimientos, setMovimientos] = useState<StockMovimiento[]>([]);
+  const [loading, setLoading] = useState(Boolean(authUid));
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    if (!authUid) {
+      setMovimientos([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    const db = getFirebaseDb();
+    const base = collection(db, COLLECTIONS.stock_movimientos);
+    const q = materialId?.trim()
+      ? query(
+          base,
+          where("materialId", "==", materialId.trim()),
+          orderBy("fecha", "desc"),
+          limit(20),
+        )
+      : query(base, orderBy("fecha", "desc"), limit(20));
+
+    const fc = options?.filterCentro?.trim();
+    const legacy = options?.includeLegacySinCentro ?? false;
+
+    const unsub: Unsubscribe = onSnapshot(
+      q,
+      (snap) => {
+        let rows: StockMovimiento[] = snap.docs.map((d) => {
+          const data = d.data() as Omit<StockMovimiento, "id">;
+          return { id: d.id, ...data };
+        });
+        if (fc) {
+          rows = rows.filter((m) => {
+            const c = (m.centro_almacen ?? "").trim();
+            if (!c && legacy) return true;
+            return c === fc;
+          });
+        }
+        setMovimientos(rows);
+        setLoading(false);
+        setError(null);
+      },
+      (err) => {
+        setError(err);
+        setLoading(false);
+      },
+    );
+    return () => unsub();
+  }, [materialId, authUid, options?.filterCentro, options?.includeLegacySinCentro]);
+
+  return { movimientos, loading, error };
+}
+
+export function useMaterialOtByNormalizacion(
+  normalizacion: MaterialNormalizacion | null | undefined,
+  authUid: string | undefined,
+  options?: { limit?: number },
+): {
+  rows: MaterialOtNormRow[];
+  loading: boolean;
+  error: Error | null;
+} {
+  const cap = options?.limit ?? 80;
+  const normKey = normalizacion ?? null;
+  const [rows, setRows] = useState<MaterialOtNormRow[]>([]);
+  const [loading, setLoading] = useState(Boolean(normKey && authUid));
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    if (!normKey || !authUid) {
+      setRows([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    const db = getFirebaseDb();
+    const q = query(
+      collectionGroup(db, MATERIALES_OT_GROUP),
+      where("schema_version", "==", 1),
+      where("normalizacion", "==", normalizacion),
+      orderBy("creado_at", "desc"),
+      limit(cap),
+    );
+    const unsub: Unsubscribe = onSnapshot(
+      q,
+      (snap) => {
+        const list: MaterialOtNormRow[] = [];
+        for (const d of snap.docs) {
+          const parts = d.ref.path.split("/");
+          const otId = parts[1] ?? "";
+          const data = d.data() as Record<string, unknown>;
+          list.push({
+            otId,
+            lineId: d.id,
+            descripcion: String(data.descripcion ?? ""),
+            cantidad: Number(data.cantidad ?? 0),
+            unidad: String(data.unidad ?? ""),
+            normalizacion: data.normalizacion as MaterialNormalizacion | undefined,
+            catalogo_id: typeof data.catalogo_id === "string" ? data.catalogo_id : undefined,
+            codigo_material: typeof data.codigo_material === "string" ? data.codigo_material : undefined,
+            descripcion_match: typeof data.descripcion_match === "string" ? data.descripcion_match : undefined,
+            confianza_ia: typeof data.confianza_ia === "number" ? data.confianza_ia : undefined,
+            nombre_normalizado:
+              typeof data.nombre_normalizado === "string" ? data.nombre_normalizado : undefined,
+            creado_at: data.creado_at as Timestamp | undefined,
+          });
+        }
+        setRows(list);
+        setLoading(false);
+        setError(null);
+      },
+      (err) => {
+        setError(err);
+        setLoading(false);
+      },
+    );
+    return () => unsub();
+  }, [normKey, authUid, cap]);
+
+  return { rows, loading, error };
 }

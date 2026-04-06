@@ -14,87 +14,184 @@ service cloud.firestore {
       return get(userDocPath());
     }
 
-    /** Sin exists(), si `users/{uid}` no está creado aún, `get().data` rompe la regla y todo queda denegado. */
-    function userRole() {
-      return signedIn() && exists(userDocPath()) &&
-          userDoc().data.rol in ['tecnico', 'supervisor', 'admin']
-        ? userDoc().data.rol
-        : 'tecnico';
+    function callerCentro() {
+      let c = request.auth.token.centro;
+      if (c != null && c != '') {
+        return c;
+      }
+      return exists(userDocPath()) ? userDoc().data.centro : '';
     }
 
-    function isAdmin() {
-      return signedIn() && userRole() == 'admin';
+    function callerRolRaw() {
+      let t = request.auth.token.rol;
+      if (t is string && t != '') {
+        return t;
+      }
+      if (exists(userDocPath())) {
+        let d = userDoc().data.rol;
+        if (d is string && d != '') {
+          return d;
+        }
+      }
+      return 'tecnico';
     }
 
-    function isSupervisor() {
-      return signedIn() && (userRole() == 'supervisor' || isAdmin());
+    /** Canonicaliza rol; valores desconocidos → técnico (evita permission-denied en lecturas). */
+    function callerRol() {
+      let r = callerRolRaw();
+      if (r == 'super_admin') {
+        return 'superadmin';
+      }
+      if (r == 'tecnico' || r == 'supervisor' || r == 'admin' || r == 'superadmin') {
+        return r;
+      }
+      if (isSuperadminRol(r)) {
+        return 'superadmin';
+      }
+      return 'tecnico';
     }
 
-    function isTecnicoUp() {
-      return signedIn() && (userRole() == 'tecnico' || isSupervisor());
+    function isSuperadminRol(r) {
+      return r == 'superadmin' || r == 'super_admin';
+    }
+
+    function roleTecnicoUp() {
+      let r = callerRol();
+      return r == 'tecnico' || r == 'supervisor' || r == 'admin' || isSuperadminRol(r);
+    }
+
+    function roleSupervisorUp() {
+      let r = callerRol();
+      return r == 'supervisor' || r == 'admin' || isSuperadminRol(r);
+    }
+
+    function roleAdminPlantaUp() {
+      let r = callerRol();
+      return r == 'admin' || isSuperadminRol(r);
+    }
+
+    function workOrderData(woId) {
+      return get(/databases/$(database)/documents/work_orders/$(woId)).data;
+    }
+
+    function canReadWorkOrder(woId) {
+      let wo = workOrderData(woId);
+      let r = callerRol();
+      if (isSuperadminRol(r)) {
+        return true;
+      }
+      if (r == 'admin' || r == 'supervisor') {
+        return wo.centro == callerCentro();
+      }
+      return r == 'tecnico' && wo.tecnico_asignado_uid == request.auth.uid;
+    }
+
+    function canMutateWorkOrder(woId) {
+      return canReadWorkOrder(woId);
+    }
+
+    function targetUserCentro(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data.centro;
     }
 
     match /users/{userId} {
-      allow read: if signedIn() && (request.auth.uid == userId || isSupervisor());
+      allow read: if signedIn() && (
+        request.auth.uid == userId
+        || (callerRol() == 'admin' && targetUserCentro(userId) == callerCentro())
+        || isSuperadminRol(callerRol())
+      );
       allow write: if false;
     }
 
+    match /admin_audit_log/{id} {
+      allow read, write: if false;
+    }
+
     match /assets/{id} {
-      allow read: if isTecnicoUp();
-      allow write: if isSupervisor();
+      allow read: if roleTecnicoUp();
+      allow write: if roleAdminPlantaUp();
+    }
+
+    match /equipos/{id} {
+      allow read: if roleTecnicoUp();
+      allow write: if roleSupervisorUp();
     }
 
     match /avisos/{id} {
-      allow read: if isTecnicoUp();
-      allow create, update: if isTecnicoUp();
-      allow delete: if isAdmin();
+      allow read: if roleTecnicoUp();
+      allow create, update: if roleTecnicoUp();
+      allow delete: if roleAdminPlantaUp();
+    }
+
+    match /{path=**}/materiales_ot/{lineId} {
+      allow read: if roleTecnicoUp();
     }
 
     match /work_orders/{woId} {
-      allow read: if isTecnicoUp();
-      allow create, update: if isTecnicoUp();
-      allow delete: if isAdmin();
+      allow read: if signedIn() && exists(/databases/$(database)/documents/work_orders/$(woId))
+        && canReadWorkOrder(woId);
+      allow create: if roleSupervisorUp()
+        && (isSuperadminRol(callerRol()) || request.resource.data.centro == callerCentro());
+      allow update: if signedIn() && exists(/databases/$(database)/documents/work_orders/$(woId))
+        && canMutateWorkOrder(woId);
+      allow delete: if roleAdminPlantaUp();
 
       match /checklist/{itemId} {
-        allow read, write: if isTecnicoUp();
+        allow read, write: if signedIn() && canMutateWorkOrder(woId);
       }
       match /materiales_ot/{lineId} {
-        allow read, write: if isTecnicoUp();
+        allow read, write: if signedIn() && canMutateWorkOrder(woId);
       }
       match /evidencias/{evId} {
-        allow read, write: if isTecnicoUp();
+        allow read, write: if signedIn() && canMutateWorkOrder(woId);
       }
       match /historial/{hId} {
-        allow read: if isTecnicoUp();
+        /* append por reglas cliente deshabilitado; lectura técnico asignado o supervisor+ */
+        allow read: if signedIn() && canReadWorkOrder(woId);
         allow write: if false;
+      }
+      match /planilla_respuestas/{respId} {
+        allow read, write: if signedIn() && canMutateWorkOrder(woId);
       }
     }
 
     match /materials/{id} {
-      allow read: if isTecnicoUp();
-      allow write: if isSupervisor();
+      allow read: if signedIn();
+      allow write: if roleAdminPlantaUp();
+    }
+
+    match /stock_movimientos/{id} {
+      allow read: if roleSupervisorUp();
+      allow write: if false;
     }
 
     match /weekly_schedule/{weekId} {
-      allow read: if isTecnicoUp();
-      allow write: if isSupervisor();
-      match /slots/{slotId} {
-        allow read: if isTecnicoUp();
-        allow write: if isSupervisor();
-      }
-      match /plan_rows/{rowId} {
-        allow read: if isTecnicoUp();
-        allow write: if isSupervisor();
-      }
+      allow read: if signedIn();
+      allow write: if roleAdminPlantaUp();
+    }
+
+    match /weekly_schedule/{weekId}/{document=**} {
+      allow read: if signedIn();
+      allow write: if roleAdminPlantaUp();
     }
 
     match /programa_semanal/{semanaId} {
-      allow read: if isTecnicoUp();
-      allow write: if isSupervisor();
+      allow read: if roleTecnicoUp();
+      allow write: if roleAdminPlantaUp();
     }
 
     match /counters/{id} {
       allow read, write: if false;
+    }
+
+    match /planilla_templates/{templateId} {
+      allow read: if roleTecnicoUp();
+      allow write: if roleAdminPlantaUp();
+    }
+
+    match /centros/{centroId} {
+      allow read: if roleTecnicoUp();
+      allow write: if isSuperadminRol(callerRol());
     }
   }
 }

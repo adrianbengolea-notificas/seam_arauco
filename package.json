@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "import:assets": "tsx scripts/import-assets-from-xlsx.ts",
-    "seed:import": "tsx scripts/seed/import-from-excel.ts"
+    "seed:import": "tsx scripts/seed/import-from-excel.ts",
+    "seed:templates": "tsx scripts/seed/seed-templates.ts"
   },
   "dependencies": {
     "@genkit-ai/google-genai": "^1.31.0",

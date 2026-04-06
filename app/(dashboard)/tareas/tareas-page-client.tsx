@@ -4,6 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DEFAULT_CENTRO } from "@/lib/config/app-config";
 import { cn } from "@/lib/utils";
+import { useCentroConfigLive } from "@/modules/centros/hooks";
+import type { Especialidad } from "@/modules/notices/types";
 import {
   useWorkOrdersByEspecialidad,
   type WorkOrderEspecialidadTab,
@@ -16,9 +18,10 @@ import {
   type WorkOrderVistaStatus,
 } from "@/modules/work-orders/types";
 import { useAuth } from "@/modules/users/hooks";
+import { usePermisos } from "@/lib/permisos/usePermisos";
 import { ChevronDown, ChevronRight, Plus } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 function statusBadgeClass(s: WorkOrderVistaStatus): string {
   switch (s) {
@@ -130,12 +133,12 @@ function CollapseSection({
   );
 }
 
-const TAB_META: { id: WorkOrderEspecialidadTab; label: string }[] = [
-  { id: "AA", label: "Aire (AA)" },
-  { id: "ELECTRICO", label: "Eléctrico" },
-  { id: "GG", label: "GG" },
-  { id: "ALL", label: "Todas" },
-];
+const ESP_TAB_LABEL: Record<Especialidad, string> = {
+  AA: "Aire (AA)",
+  ELECTRICO: "Eléctrico",
+  GG: "GG",
+  HG: "HG",
+};
 
 const STATUS_FILTERS: { id: WorkOrderVistaStatus | "ALL"; label: string }[] = [
   { id: "ALL", label: "Todos" },
@@ -146,12 +149,32 @@ const STATUS_FILTERS: { id: WorkOrderVistaStatus | "ALL"; label: string }[] = [
 ];
 
 export function TareasPageClient() {
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
+  const { puede } = usePermisos();
   const centro = profile?.centro ?? DEFAULT_CENTRO;
+  const { config: centroCfg } = useCentroConfigLive(centro);
+  const tabMeta = useMemo(() => {
+    const base = centroCfg.especialidades_activas.map((id) => ({
+      id: id as WorkOrderEspecialidadTab,
+      label: ESP_TAB_LABEL[id],
+    }));
+    return [...base, { id: "ALL" as const, label: "Todas" }];
+  }, [centroCfg.especialidades_activas]);
+
   const [tab, setTab] = useState<WorkOrderEspecialidadTab>("AA");
   const [statusFilter, setStatusFilter] = useState<WorkOrderVistaStatus | "ALL">("ALL");
 
-  const { ots, loading, error } = useWorkOrdersByEspecialidad(centro, tab, statusFilter);
+  useEffect(() => {
+    const allowed = new Set<WorkOrderEspecialidadTab>([...centroCfg.especialidades_activas, "ALL"]);
+    if (!allowed.has(tab)) {
+      setTab((centroCfg.especialidades_activas[0] as WorkOrderEspecialidadTab | undefined) ?? "ALL");
+    }
+  }, [centroCfg.especialidades_activas, tab]);
+
+  const { ots, loading, error } = useWorkOrdersByEspecialidad(centro, tab, statusFilter, {
+    uid: user?.uid ?? "",
+    rol: profile?.rol ?? "tecnico",
+  });
 
   const { primaryTitle, primaryList, correctivos } = useMemo(() => {
     const checklist = ots.filter((o) => workOrderSubtipo(o) === "checklist");
@@ -163,7 +186,7 @@ export function TareasPageClient() {
     return { primaryTitle: "Preventivos", primaryList: preventivos, correctivos: corr };
   }, [ots, tab]);
 
-  const puedeCrearOt = profile?.rol === "supervisor" || profile?.rol === "admin";
+  const puedeCrearOt = puede("programa:crear_ot");
 
   return (
     <div className="space-y-4 pb-24">
@@ -173,7 +196,7 @@ export function TareasPageClient() {
       </div>
 
       <div className="flex flex-wrap gap-2 border-b border-zinc-200 pb-2 dark:border-zinc-800">
-        {TAB_META.map((t) => (
+        {tabMeta.map((t) => (
           <button
             key={t.id}
             type="button"

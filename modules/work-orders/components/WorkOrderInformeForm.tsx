@@ -22,9 +22,12 @@ type FormValues = z.infer<typeof schema>;
 export function WorkOrderInformeForm({
   workOrder,
   onMessage,
+  iaEnabled = true,
 }: {
   workOrder: WorkOrder;
   onMessage: (msg: string | null) => void;
+  /** `centros/{id}.modulos.ia` */
+  iaEnabled?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const form = useForm<FormValues>({
@@ -90,16 +93,20 @@ export function WorkOrderInformeForm({
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
-      <div>
-        <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
-          Palabras clave (para IA, opcional)
-        </label>
-        <Input
-          placeholder="Ej.: reemplazo sello, prueba 15 min sin fugas…"
-          disabled={cerrada || busy}
-          {...form.register("ai_keywords")}
-        />
-      </div>
+      {iaEnabled ? (
+        <div>
+          <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+            Palabras clave (para IA, opcional)
+          </label>
+          <Input
+            placeholder="Ej.: reemplazo sello, prueba 15 min sin fugas…"
+            disabled={cerrada || busy}
+            {...form.register("ai_keywords")}
+          />
+        </div>
+      ) : (
+        <p className="text-xs text-zinc-500">El módulo de IA está deshabilitado para este centro.</p>
+      )}
       <div>
         <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
           Informe / trabajo ejecutado
@@ -113,10 +120,20 @@ export function WorkOrderInformeForm({
         <Button type="submit" disabled={cerrada || busy}>
           Guardar informe
         </Button>
-        <Button type="button" variant="secondary" disabled={cerrada || busy} onClick={() => void onAi("trabajo_realizado")}>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={cerrada || busy || !iaEnabled}
+          onClick={() => void onAi("trabajo_realizado")}
+        >
           IA: trabajo realizado
         </Button>
-        <Button type="button" variant="outline" disabled={cerrada || busy} onClick={() => void onAi("observaciones")}>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={cerrada || busy || !iaEnabled}
+          onClick={() => void onAi("observaciones")}
+        >
           IA: observaciones
         </Button>
       </div>

@@ -28,6 +28,7 @@ export function useAssetsLive(max: number = 200): {
     let unsubAuth: AuthUnsub | undefined;
     let unsubSnap: Unsubscribe | undefined;
 
+    let effectActive = true;
     unsubAuth = onAuthStateChanged(auth, (user) => {
       unsubSnap?.();
       unsubSnap = undefined;
@@ -39,26 +40,38 @@ export function useAssetsLive(max: number = 200): {
       }
       setLoading(true);
       setError(null);
-      const db = getFirebaseDb();
-      const q = query(collection(db, "assets"), orderBy("codigo_nuevo"), limit(max));
-      unsubSnap = onSnapshot(
-        q,
-        (snap) => {
-          const rows: Asset[] = snap.docs.map((d) => ({
-            id: d.id,
-            ...(d.data() as Omit<Asset, "id">),
-          }));
-          setAssets(rows);
+      void (async () => {
+        try {
+          await user.getIdToken(true);
+        } catch (e) {
+          if (!effectActive) return;
+          setError(e instanceof Error ? e : new Error("No se pudo renovar la sesión"));
           setLoading(false);
-        },
-        (err) => {
-          setError(err);
-          setLoading(false);
-        },
-      );
+          return;
+        }
+        if (!effectActive || auth.currentUser?.uid !== user.uid) return;
+        const db = getFirebaseDb();
+        const q = query(collection(db, "assets"), orderBy("codigo_nuevo"), limit(max));
+        unsubSnap = onSnapshot(
+          q,
+          (snap) => {
+            const rows: Asset[] = snap.docs.map((d) => ({
+              id: d.id,
+              ...(d.data() as Omit<Asset, "id">),
+            }));
+            setAssets(rows);
+            setLoading(false);
+          },
+          (err) => {
+            setError(err);
+            setLoading(false);
+          },
+        );
+      })();
     });
 
     return () => {
+      effectActive = false;
       unsubAuth?.();
       unsubSnap?.();
     };
@@ -87,6 +100,7 @@ export function useAssetLive(assetId: string | undefined): {
     let unsubAuth: AuthUnsub | undefined;
     let unsubSnap: Unsubscribe | undefined;
 
+    let effectActive = true;
     unsubAuth = onAuthStateChanged(auth, (user) => {
       unsubSnap?.();
       unsubSnap = undefined;
@@ -96,27 +110,39 @@ export function useAssetLive(assetId: string | undefined): {
         return;
       }
 
-      const db = getFirebaseDb();
-      const ref = doc(db, "assets", assetId);
-      unsubSnap = onSnapshot(
-        ref,
-        (snap) => {
-          if (!snap.exists) {
-            setAsset(null);
+      void (async () => {
+        try {
+          await user.getIdToken(true);
+        } catch (e) {
+          if (!effectActive) return;
+          setError(e instanceof Error ? e : new Error("No se pudo renovar la sesión"));
+          setLoading(false);
+          return;
+        }
+        if (!effectActive || auth.currentUser?.uid !== user.uid) return;
+        const db = getFirebaseDb();
+        const ref = doc(db, "assets", assetId);
+        unsubSnap = onSnapshot(
+          ref,
+          (snap) => {
+            if (!snap.exists) {
+              setAsset(null);
+              setLoading(false);
+              return;
+            }
+            setAsset({ id: snap.id, ...(snap.data() as Omit<Asset, "id">) });
             setLoading(false);
-            return;
-          }
-          setAsset({ id: snap.id, ...(snap.data() as Omit<Asset, "id">) });
-          setLoading(false);
-        },
-        (err) => {
-          setError(err);
-          setLoading(false);
-        },
-      );
+          },
+          (err) => {
+            setError(err);
+            setLoading(false);
+          },
+        );
+      })();
     });
 
     return () => {
+      effectActive = false;
       unsubAuth?.();
       unsubSnap?.();
     };

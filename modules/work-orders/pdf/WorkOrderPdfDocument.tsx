@@ -1,8 +1,11 @@
 import React from "react";
 import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
+import type { PlanillaRespuesta, PlanillaTemplate } from "@/lib/firestore/types";
 import { formatFirestoreDate } from "@/lib/pdf/format-firestore-date";
 import type { MaterialOtListRow } from "@/modules/materials/types";
-import type { WorkOrder } from "@/modules/work-orders/types";
+import { historialEventoResumen, historialEventoTitulo } from "@/modules/work-orders/historial-labels";
+import { PlanillaPDFSection } from "@/modules/work-orders/pdf/PlanillaPDFSection";
+import type { WorkOrder, WorkOrderHistorialEvent } from "@/modules/work-orders/types";
 
 const styles = StyleSheet.create({
   page: { padding: 40, fontSize: 10, fontFamily: "Helvetica" },
@@ -49,6 +52,7 @@ const styles = StyleSheet.create({
     borderBottomColor: "#e4e4e7",
   },
   tableRow: { flexDirection: "row", padding: 5, borderBottomWidth: 1, borderBottomColor: "#e4e4e7" },
+  histRow: { flexDirection: "row", padding: 4, borderBottomWidth: 1, borderBottomColor: "#f4f4f5", fontSize: 8 },
 });
 
 function materialCodigo(m: MaterialOtListRow): string {
@@ -70,9 +74,15 @@ function materialUd(m: MaterialOtListRow): string {
 export function WorkOrderPdfDocument({
   workOrder,
   materiales,
+  historial,
+  planillaTemplate,
+  planillaRespuesta,
 }: {
   workOrder: WorkOrder;
   materiales: MaterialOtListRow[];
+  historial: WorkOrderHistorialEvent[];
+  planillaTemplate?: PlanillaTemplate | null;
+  planillaRespuesta?: PlanillaRespuesta | null;
 }) {
   return (
     <Document>
@@ -183,6 +193,55 @@ export function WorkOrderPdfDocument({
 
         <Text style={styles.footer}>
           Documento generado por Arauco-Seam · ID interno {workOrder.id}
+        </Text>
+      </Page>
+
+      {planillaTemplate && planillaRespuesta ? (
+        <Page size="A4" style={styles.page}>
+          <PlanillaPDFSection workOrder={workOrder} template={planillaTemplate} respuesta={planillaRespuesta} />
+          <Text style={styles.footer}>Planilla digital · {workOrder.id}</Text>
+        </Page>
+      ) : null}
+
+      <Page size="A4" style={styles.page}>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.brand}>Arauco-Seam</Text>
+            <Text>Historial de eventos</Text>
+          </View>
+          <View style={{ textAlign: "right" }}>
+            <Text style={{ fontWeight: "bold" }}>OT {workOrder.n_ot}</Text>
+          </View>
+        </View>
+
+        <View style={styles.sectionTitle}>
+          <Text>HISTORIAL ({historial.length})</Text>
+        </View>
+        {historial.length === 0 ? (
+          <Text style={{ fontSize: 9, color: "#71717a" }}>Sin eventos registrados.</Text>
+        ) : (
+          <>
+            <View style={[styles.tableHeader, { fontSize: 8 }]}>
+              <Text style={{ width: "20%" }}>Fecha</Text>
+              <Text style={{ width: "22%" }}>Tipo</Text>
+              <Text style={{ width: "18%" }}>Actor</Text>
+              <Text style={{ width: "40%" }}>Detalle</Text>
+            </View>
+            {historial.map((ev) => (
+              <View key={ev.id} style={styles.histRow} wrap={false}>
+                <Text style={{ width: "20%" }}>{formatFirestoreDate(ev.created_at, "dd/MM/yy HH:mm")}</Text>
+                <Text style={{ width: "22%" }}>{historialEventoTitulo(ev.tipo)}</Text>
+                <Text style={{ width: "18%" }}>{ev.actor_uid.slice(0, 8)}…</Text>
+                <Text style={{ width: "40%" }}>{`${
+                  historialEventoResumen(ev) || JSON.stringify(ev.payload ?? {}).slice(0, 120)
+                }`}</Text>
+              </View>
+            ))}
+          </>
+        )}
+
+        <Text style={styles.footer}>
+          Historial · Arauco-Seam · {workOrder.id}
         </Text>
       </Page>
     </Document>

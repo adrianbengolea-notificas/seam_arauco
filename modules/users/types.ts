@@ -1,6 +1,11 @@
+import type { Rol } from "@/lib/permisos/index";
 import type { Timestamp } from "firebase/firestore";
 
-export type UserRole = "tecnico" | "supervisor" | "admin";
+/** Rol canónico (JWT / lógica de permisos). */
+export type UserRol = Rol;
+
+/** Incluye valor legado almacenado en Firestore antes de la migración. */
+export type UserRole = UserRol | "super_admin";
 
 /** Perfil extendido en Firestore: users/{uid} */
 export type UserProfile = {

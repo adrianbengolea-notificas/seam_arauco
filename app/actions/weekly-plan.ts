@@ -2,8 +2,7 @@
 
 import { failure, success, type ActionResult } from "@/lib/actions/action-result";
 import { AppError, isAppError } from "@/lib/errors/app-error";
-import { requireRole, verifyIdTokenOrThrow } from "@/lib/auth/verify-id-token";
-import { assertUserCanAct } from "@/modules/users/service";
+import { requirePermisoFromToken } from "@/lib/permisos/server";
 import {
   addWeeklyPlanRow,
   patchWeeklyPlanRow,
@@ -66,9 +65,7 @@ export async function actionReplaceWeeklyPlanRows(
   input: z.infer<typeof planRowImportSchema>,
 ): Promise<ActionResult<void>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, ["supervisor", "admin"]);
-    const profile = await assertUserCanAct(session.uid, ["supervisor", "admin"]);
+    const profile = await requirePermisoFromToken(idToken, "programa:editar");
     const parsed = planRowImportSchema.parse(input);
     await replaceWeeklyPlanRows({
       weekId: parsed.weekId,
@@ -86,9 +83,7 @@ export async function actionAddWeeklyPlanRow(
   input: z.infer<typeof addPlanRowSchema>,
 ): Promise<ActionResult<{ rowId: string }>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, ["supervisor", "admin"]);
-    const profile = await assertUserCanAct(session.uid, ["supervisor", "admin"]);
+    const profile = await requirePermisoFromToken(idToken, "programa:editar");
     const parsed = addPlanRowSchema.parse(input);
     const rowId = await addWeeklyPlanRow({
       weekId: parsed.weekId,
@@ -107,9 +102,7 @@ export async function actionPatchWeeklyPlanRow(
   input: z.infer<typeof patchPlanRowSchema>,
 ): Promise<ActionResult<void>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, ["supervisor", "admin"]);
-    const profile = await assertUserCanAct(session.uid, ["supervisor", "admin"]);
+    const profile = await requirePermisoFromToken(idToken, "programa:editar");
     const parsed = patchPlanRowSchema.parse(input);
     const { weekId, rowId, ...rest } = parsed;
     const patch: Partial<Pick<WeeklyPlanRow, "localidad" | "especialidad" | "texto" | "dia_semana">> = {};
@@ -136,9 +129,7 @@ export async function actionDeleteWeeklyPlanRow(
   input: z.infer<typeof deletePlanRowSchema>,
 ): Promise<ActionResult<void>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, ["supervisor", "admin"]);
-    const profile = await assertUserCanAct(session.uid, ["supervisor", "admin"]);
+    const profile = await requirePermisoFromToken(idToken, "programa:editar");
     const parsed = deletePlanRowSchema.parse(input);
     await removeWeeklyPlanRow({
       weekId: parsed.weekId,

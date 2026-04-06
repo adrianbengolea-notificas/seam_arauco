@@ -131,20 +131,24 @@ export function useWeeklyPlanRowsLive(weekId: string | undefined, authUid: strin
       }
 
       const db = getFirebaseDb();
-      const q = query(
-        collection(db, COLLECTIONS.weekly_schedule, key, "plan_rows"),
-        orderBy("dia_semana"),
-        orderBy("orden"),
-      );
+      /** Sin `orderBy` compuesto: evita índice `dia_semana`+`orden`+`__name__` en Firebase. Orden en cliente. */
+      const colRef = collection(db, COLLECTIONS.weekly_schedule, key, "plan_rows");
 
       unsub = onSnapshot(
-        q,
+        colRef,
         (snap) => {
           if (cancelled) return;
-          const list = snap.docs.map((d) => {
-            const data = d.data() as Omit<WeeklyPlanRow, "id">;
-            return { id: d.id, ...data } as WeeklyPlanRow;
-          });
+          const list = snap.docs
+            .map((d) => {
+              const data = d.data() as Omit<WeeklyPlanRow, "id">;
+              return { id: d.id, ...data } as WeeklyPlanRow;
+            })
+            .sort((a, b) => {
+              const da = a.dia_semana ?? 0;
+              const dbd = b.dia_semana ?? 0;
+              if (da !== dbd) return da - dbd;
+              return (a.orden ?? 0) - (b.orden ?? 0);
+            });
           setRows(list);
           setLoading(false);
           setError(null);

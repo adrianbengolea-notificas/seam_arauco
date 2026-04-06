@@ -1,7 +1,10 @@
+import type { Timestamp } from "firebase/firestore";
+
 /**
  * Tipos de referencia para imports (seed) y documentación.
  * Los documentos reales en Firestore siguen los tipos canónicos:
- * - Activos: `modules/assets/types` → colección `assets` (no `equipos`)
+ * - Activos: `modules/assets/types` → colección `assets`
+ * - Equipos catálogo Excel: `equipos` (código nuevo como id)
  * - Avisos: `modules/notices/types` → colección `avisos`
  */
 
@@ -39,3 +42,148 @@ export type AvisoFirestoreShape = {
   texto_largo?: string;
   estado: string;
 };
+
+/** Documento `equipos/{codigo}` (seed Excel). */
+export interface Equipo {
+  id: string;
+  codigo: string;
+  codigoViejo: string;
+  descripcion: string;
+  ubicacionTecnica: string;
+  denomUbicTecnica: string;
+  especialidad: "A" | "GG";
+  centro: string;
+  createdAt: Timestamp;
+}
+
+/**
+ * Vista orientada al prompt de diseño; en Firestore el aviso canónico es `modules/notices/types` (`n_aviso`, snake_case).
+ */
+export interface Aviso {
+  id: string;
+  numero: string;
+  descripcion: string;
+  ubicacionTecnica: string;
+  denomUbicTecnica: string;
+  especialidad: "A" | "E" | "GG" | "HG";
+  tipo: "preventivo" | "correctivo";
+  frecuencia?: "M" | "T" | "S" | "A";
+  status: "PDTE" | "EN_CURSO" | "COMPLETADA" | "CANCELADA";
+  centro?: string;
+  ptoTrbRes?: string;
+  fechaProgramada?: Timestamp;
+  otId?: string;
+  createdAt: Timestamp;
+}
+
+// ─── Planillas digitales (templates + respuestas por OT) ─────────────────────
+
+export type PlanillaTemplateEspecialidad = "A" | "E" | "GG" | "*";
+export type PlanillaTemplateSubTipo = "preventivo" | "correctivo" | "*";
+
+export type PlanillaSeccionTipo =
+  | "checklist"
+  | "libre"
+  | "datos_equipo"
+  | "grilla"
+  | "datos_persona"
+  | "estado_final";
+
+export type ItemEstadoPlanilla = "BUENO" | "REGULAR" | "MALO" | "OK" | "FALLA" | "N/A";
+
+export interface ItemTemplate {
+  id: string;
+  label: string;
+  acciones?: string[];
+  columnas?: string[];
+  estadosDisponibles?: ItemEstadoPlanilla[];
+  requiereObsEn?: ItemEstadoPlanilla[];
+  obligatorio?: boolean;
+}
+
+export interface SeccionTemplate {
+  id: string;
+  titulo: string;
+  tipo: PlanillaSeccionTipo;
+  items?: ItemTemplate[];
+  /** Columnas comunes para toda la grilla (p. ej. Elec). */
+  grillaColumnas?: string[];
+  etiquetaLibre?: string;
+  obligatorio?: boolean;
+  soloAdmin?: boolean;
+  maxFilasPersona?: number;
+}
+
+export interface PlanillaTemplate {
+  id: string;
+  nombre: string;
+  especialidad: PlanillaTemplateEspecialidad;
+  subTipo: PlanillaTemplateSubTipo;
+  secciones: SeccionTemplate[];
+}
+
+export interface ItemRespuesta {
+  checklist?: boolean;
+  servis?: boolean;
+  estado?: "BUENO" | "REGULAR" | "MALO" | "N/A";
+  verificada?: boolean;
+  cantEnFalla?: number;
+  operativas?: number;
+  observacion?: string;
+  accionSeleccionada?: string;
+  /** Texto libre por ítem (p. ej. “Otros”). */
+  comentario?: string;
+}
+
+export type PlanillaPersonaFila = {
+  nombreApellido?: string;
+  cargoCategoria?: string;
+  observaciones?: string;
+};
+
+export type PlanillaRespuestaStatus = "borrador" | "completada" | "firmada";
+
+export interface PlanillaRespuesta {
+  id: string;
+  templateId: string;
+  otId: string;
+  equipoCodigo?: string;
+  datosEquipo?: {
+    tipo?: string;
+    marca?: string;
+    modelo?: string;
+    rendimiento?: "A" | "B" | "C" | "D";
+    tipoGas?: string;
+    frigorias?: string;
+    potencia?: string;
+    tipoPlaca?: "Original" | "Universal" | "C/Vistato";
+    frioCalor?: boolean;
+    frioSolo?: boolean;
+    codigoEquipo?: string;
+    serie_ext?: string;
+    serie_int?: string;
+  };
+  frecuencia?: "M" | "T" | "S" | "A";
+  intervencion?: "preventiva" | "correctiva";
+  respuestas: Record<string, ItemRespuesta>;
+  textoLibrePorSeccion?: Record<string, string>;
+  actividadRealizada?: string;
+  materialesTexto?: string;
+  recomendaciones?: string;
+  pedidoMateriales?: string;
+  observacionesUsuario?: string;
+  estadoFinal?: "BUENO" | "REGULAR" | "REPARAR";
+  observacionesFinales?: string;
+  controlCalidadSSGG?: string;
+  filasPersonal?: PlanillaPersonaFila[];
+  firmaUsuario?: string;
+  firmaUsuarioNombre?: string;
+  firmaUsuarioLegajo?: string;
+  firmaUsuarioFecha?: Timestamp;
+  firmaResponsable?: string;
+  firmaResponsableNombre?: string;
+  status: PlanillaRespuestaStatus;
+  completadoPor: string;
+  completadoAt?: Timestamp;
+  creadoAt: Timestamp;
+}

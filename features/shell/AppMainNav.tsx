@@ -1,16 +1,19 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { useCentroConfigLive } from "@/modules/centros/hooks";
 import { useAuthUser, useUserProfile } from "@/modules/users/hooks";
+import { PermisoGuard } from "@/components/auth/PermisoGuard";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useMemo } from "react";
 
 const links = [
-  { href: "/dashboard", label: "Panel" },
-  { href: "/programa", label: "Programa" },
-  { href: "/tareas", label: "Tareas" },
-  { href: "/materiales", label: "Materiales" },
-  { href: "/activos", label: "Activos" },
+  { href: "/dashboard", label: "Panel", module: null as "materiales" | "activos" | null },
+  { href: "/programa", label: "Programa", module: null },
+  { href: "/tareas", label: "Tareas", module: null },
+  { href: "/materiales", label: "Materiales", module: "materiales" as const },
+  { href: "/activos", label: "Activos", module: "activos" as const },
 ] as const;
 
 function pathMatches(href: string, pathname: string | null): boolean {
@@ -25,6 +28,15 @@ export function AppMainNav() {
   const profileUid =
     pathname === "/login" || pathname?.startsWith("/login/") ? undefined : user?.uid;
   const { profile } = useUserProfile(profileUid);
+  const { config: centroConfig } = useCentroConfigLive(profile?.centro);
+
+  const navLinks = useMemo(() => {
+    return links.filter((l) => {
+      if (l.module === "materiales") return centroConfig.modulos.materiales;
+      if (l.module === "activos") return centroConfig.modulos.activos;
+      return true;
+    });
+  }, [centroConfig.modulos.activos, centroConfig.modulos.materiales]);
 
   const linkClass = (active: boolean) =>
     cn(
@@ -36,7 +48,7 @@ export function AppMainNav() {
 
   return (
     <nav className="order-3 flex w-full flex-wrap items-center justify-center gap-0.5 sm:order-none sm:flex-1">
-      {links.map((l) => {
+      {navLinks.map((l) => {
         const active = pathMatches(l.href, pathname);
         return (
           <Link key={l.href} href={l.href} className={linkClass(active)}>
@@ -44,7 +56,7 @@ export function AppMainNav() {
           </Link>
         );
       })}
-      {profile?.rol === "admin" ? (
+      <PermisoGuard permiso="admin:gestionar_usuarios">
         <Link
           href="/superadmin"
           className={cn(
@@ -56,7 +68,20 @@ export function AppMainNav() {
         >
           Superadmin
         </Link>
-      ) : null}
+      </PermisoGuard>
+      <PermisoGuard permiso="materiales:ingresar_stock">
+        <Link
+          href="/superadmin/materiales"
+          className={cn(
+            "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+            pathname === "/superadmin/materiales"
+              ? "bg-brand text-brand-foreground shadow-sm"
+              : "text-header-muted ring-1 ring-white/15 hover:bg-white/10 hover:text-header-fg",
+          )}
+        >
+          Inventario
+        </Link>
+      </PermisoGuard>
     </nav>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { ProgramaSemanalClient } from "@/app/programa-semanal/programa-semanal-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,9 +15,11 @@ import type {
   ProgramaSemana,
   SlotSemanal,
 } from "@/modules/scheduling/types";
+import { usePermisos } from "@/lib/permisos/usePermisos";
 import { useAuth } from "@/modules/users/hooks";
 import { X } from "lucide-react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const DIAS_ORDEN: DiaSemanaPrograma[] = [
@@ -191,10 +194,27 @@ function AvisoDrawer({
 }
 
 export function ProgramaClient() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const vistaOperativo = searchParams.get("vista") === "operativo";
+
   const { user, profile, loading: authLoading } = useAuth();
   const centro = profile?.centro ?? DEFAULT_CENTRO;
 
   const { semanas, loading: semanasLoading, error: semanasError } = useSemanasDisponibles(centro, user?.uid);
+
+  function setVistaPublicada() {
+    const p = new URLSearchParams(searchParams.toString());
+    p.delete("vista");
+    const q = p.toString();
+    router.replace(q ? `/programa?${q}` : "/programa");
+  }
+
+  function setVistaOperativa() {
+    const p = new URLSearchParams(searchParams.toString());
+    p.set("vista", "operativo");
+    router.replace(`/programa?${p.toString()}`);
+  }
 
   const [semanaIdElegida, setSemanaIdElegida] = useState<string | null>(null);
   const [filtroEsp, setFiltroEsp] = useState<FiltroEspecialidad>("todos");
@@ -236,8 +256,9 @@ export function ProgramaClient() {
     [filtroDia],
   );
 
-  const puedeCrearOt = profile?.rol === "supervisor" || profile?.rol === "admin";
-  const esAdmin = profile?.rol === "admin";
+  const { puede } = usePermisos();
+  const puedeCrearOt = puede("programa:crear_ot");
+  const esAdmin = puede("programa:editar");
 
   const cerrarDrawer = useCallback(() => setDrawer(null), []);
 
@@ -247,38 +268,104 @@ export function ProgramaClient() {
     return <p className="text-sm text-muted-foreground">Cargando sesión…</p>;
   }
 
+  if (vistaOperativo) {
+    return (
+      <div className="space-y-6">
+        <header className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">Programa semanal</h1>
+              <p className="text-sm text-muted-foreground">
+                Centro <span className="font-mono">{centro}</span>
+                {profile?.rol ? ` · ${profile.rol}` : null}
+              </p>
+            </div>
+          </div>
+          <div className="inline-flex rounded-lg border border-border bg-muted/30 p-1">
+            <Button
+              type="button"
+              variant={vistaOperativo ? "ghost" : "secondary"}
+              size="sm"
+              className={cn(!vistaOperativo && "shadow-sm")}
+              onClick={setVistaPublicada}
+            >
+              Grilla publicada
+            </Button>
+            <Button
+              type="button"
+              variant={vistaOperativo ? "secondary" : "ghost"}
+              size="sm"
+              className={cn(vistaOperativo && "shadow-sm")}
+              onClick={setVistaOperativa}
+            >
+              OT, texto e importar Excel
+            </Button>
+          </div>
+        </header>
+        <ProgramaSemanalClient embedded />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Programa semanal</h1>
-          <p className="text-sm text-muted-foreground">
-            Centro <span className="font-mono">{centro}</span>
-            {profile?.rol ? ` · ${profile.rol}` : null}
-          </p>
+      <header className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Programa semanal</h1>
+            <p className="text-sm text-muted-foreground">
+              Centro <span className="font-mono">{centro}</span>
+              {profile?.rol ? ` · ${profile.rol}` : null}
+            </p>
+          </div>
+          <label className="flex min-w-[min(100%,20rem)] flex-col gap-1 text-sm font-medium text-foreground">
+            Semana
+            <select
+              className="rounded-lg border border-border bg-background px-3 py-2 text-sm font-normal shadow-sm"
+              value={semanaId}
+              onChange={(e) => setSemanaIdElegida(e.target.value)}
+              disabled={semanasLoading || !semanas.length}
+            >
+              {!semanas.length ? <option value="">— Sin semanas —</option> : null}
+              {semanas.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
-        <label className="flex min-w-[min(100%,20rem)] flex-col gap-1 text-sm font-medium text-foreground">
-          Semana
-          <select
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm font-normal shadow-sm"
-            value={semanaId}
-            onChange={(e) => setSemanaIdElegida(e.target.value)}
-            disabled={semanasLoading || !semanas.length}
-          >
-            {!semanas.length ? <option value="">— Sin semanas —</option> : null}
-            {semanas.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="inline-flex flex-wrap rounded-lg border border-border bg-muted/30 p-1">
+          <Button type="button" variant="secondary" size="sm" className="shadow-sm" onClick={setVistaPublicada}>
+            Grilla publicada
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={setVistaOperativa}>
+            OT, texto e importar Excel
+          </Button>
+        </div>
       </header>
 
       {semanasError ? (
-        <p className="text-sm text-destructive" role="alert">
-          No se pudieron cargar las semanas: {semanasError.message}
-        </p>
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">
+          <p className="font-medium">No se pudieron cargar las semanas publicadas</p>
+          <p className="mt-1">{semanasError.message}</p>
+          {(semanasError as { code?: string }).code === "permission-denied" ? (
+            <p className="mt-2 text-foreground">
+              Comprobá que en Firebase estén desplegadas las reglas del repo (colección{" "}
+              <span className="font-mono">programa_semanal</span>, lectura para usuarios
+              con sesión) y que exista tu perfil en la colección <span className="font-mono">users</span> con rol
+              válido. Mientras tanto podés usar la pestaña{" "}
+              <button
+                type="button"
+                className="font-medium text-primary underline underline-offset-2"
+                onClick={setVistaOperativa}
+              >
+                OT, texto e importar Excel
+              </button>{" "}
+              (plan en <span className="font-mono">weekly_schedule</span>).
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {programaError ? (
         <p className="text-sm text-destructive" role="alert">
@@ -331,8 +418,19 @@ export function ProgramaClient() {
 
       {!semanas.length && !semanasLoading ? (
         <Card>
-          <CardContent className="pt-6 text-sm text-muted-foreground">
-            No hay programas publicados para este centro. {esAdmin ? "Podés cargarlos desde administración." : null}
+          <CardContent className="space-y-3 pt-6 text-sm text-muted-foreground">
+            <p>No hay programas publicados en la grilla clásica (colección programa_semanal) para este centro.</p>
+            <p>
+              Para cargar el plan con Excel, texto manual u OT en calendario, abrí la pestaña{" "}
+              <button
+                type="button"
+                className="font-medium text-primary underline underline-offset-2"
+                onClick={setVistaOperativa}
+              >
+                OT, texto e importar Excel
+              </button>
+              .
+            </p>
           </CardContent>
         </Card>
       ) : null}
@@ -342,8 +440,8 @@ export function ProgramaClient() {
           <CardContent className="flex flex-col gap-4 pt-6 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">Sin programa cargado para esta semana.</p>
             {esAdmin ? (
-              <Button variant="outline" asChild>
-                <Link href="/programa/cargar">Cargar programa</Link>
+              <Button variant="outline" type="button" onClick={setVistaOperativa}>
+                Cargar / importar Excel
               </Button>
             ) : null}
           </CardContent>

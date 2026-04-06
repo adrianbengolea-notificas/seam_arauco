@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { getFirebaseDb } from "@/firebase/firebaseClient";
 import { DEFAULT_CENTRO } from "@/lib/config/app-config";
+import { useCentroConfigLive } from "@/modules/centros/hooks";
 import type { Aviso } from "@/modules/notices/types";
 import type { Especialidad } from "@/modules/notices/types";
 import { useAssetsLive } from "@/modules/assets/hooks";
@@ -53,11 +54,22 @@ const SUB_OPTS: { value: WorkOrderSubTipo; label: string }[] = [
 export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: string }) {
   const { profile } = useAuth();
   const centro = profile?.centro ?? DEFAULT_CENTRO;
+  const { config: centroCfg } = useCentroConfigLive(centro);
+  const espOpts = useMemo(
+    () => ESP_OPTS.filter((o) => centroCfg.especialidades_activas.includes(o.value)),
+    [centroCfg.especialidades_activas],
+  );
   const { assets } = useAssetsLive(400);
 
   const [avisoId, setAvisoId] = useState("");
   const [avisoNumeroDispl, setAvisoNumeroDispl] = useState("");
   const [especialidad, setEspecialidad] = useState<Especialidad>("AA");
+
+  useEffect(() => {
+    if (!espOpts.some((o) => o.value === especialidad) && espOpts[0]) {
+      setEspecialidad(espOpts[0].value);
+    }
+  }, [espOpts, especialidad]);
   const [subTipo, setSubTipo] = useState<WorkOrderSubTipo>("preventivo");
   const [assetId, setAssetId] = useState("");
   const [tecnicoNombre, setTecnicoNombre] = useState("");
@@ -229,7 +241,7 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
               value={especialidad}
               onChange={(e) => setEspecialidad(e.target.value as Especialidad)}
             >
-              {ESP_OPTS.map((o) => (
+              {espOpts.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
                 </option>

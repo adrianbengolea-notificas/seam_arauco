@@ -46,9 +46,31 @@ export type MaterialCatalogItem = {
   unidad_medida: string;
   centro_almacen?: string;
   stock_disponible?: number;
+  /** Si stock_disponible <= stock_minimo, se trata como alerta (dashboard). */
+  stock_minimo?: number | null;
   activo: boolean;
   created_at: Timestamp;
   updated_at: Timestamp;
+};
+
+/** Movimiento de inventario — colección `stock_movimientos`. */
+export type StockMovimiento = {
+  id: string;
+  materialId: string;
+  codigoMaterial: string;
+  descripcion: string;
+  tipo: "entrada" | "salida";
+  cantidad: number;
+  unidad: string;
+  origen: "ARAUCO" | "EXTERNO" | "OT";
+  otId?: string;
+  observaciones?: string;
+  /** Denormalizado del catálogo para filtrar reporting por centro / almacén. */
+  centro_almacen?: string;
+  stockAntes: number;
+  stockDespues: number;
+  registradoPor: string;
+  fecha: Timestamp;
 };
 
 /** Línea consumida en una OT — subcolección `work_orders/{woId}/materiales_ot` */

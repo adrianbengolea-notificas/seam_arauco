@@ -2,8 +2,7 @@
 
 import { failure, success, type ActionResult } from "@/lib/actions/action-result";
 import { AppError, isAppError } from "@/lib/errors/app-error";
-import { requireRole, verifyIdTokenOrThrow } from "@/lib/auth/verify-id-token";
-import { assertUserCanAct } from "@/modules/users/service";
+import { requirePermisoFromToken } from "@/lib/permisos/server";
 import type { FirmaDigital } from "@/modules/work-orders/types";
 import {
   addMaterialOtField,
@@ -24,9 +23,6 @@ import {
 import type { WorkOrderVistaStatus } from "@/modules/work-orders/types";
 import { Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
-
-const rolesWrite = ["tecnico", "supervisor", "admin"] as const;
-const rolesClose = ["supervisor", "admin"] as const;
 
 function wrap<T>(fn: () => Promise<T>): Promise<ActionResult<T>> {
   return fn()
@@ -73,9 +69,7 @@ export async function actionCreateWorkOrderFromAviso(
   input: { avisoId: string },
 ): Promise<ActionResult<string>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, ["supervisor", "admin"]);
-    await assertUserCanAct(session.uid, ["supervisor", "admin"]);
+    const session = await requirePermisoFromToken(idToken, "programa:crear_ot");
     return createWorkOrderFromAviso({ avisoId: input.avisoId, actorUid: session.uid });
   });
 }
@@ -85,9 +79,7 @@ export async function actionAssignTechnician(
   input: { workOrderId: string; tecnicoUid: string; tecnicoNombre: string },
 ): Promise<ActionResult<void>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, ["supervisor", "admin"]);
-    await assertUserCanAct(session.uid, ["supervisor", "admin"]);
+    const session = await requirePermisoFromToken(idToken, "ot:cancelar_reasignar");
     await assignTechnician({
       workOrderId: input.workOrderId,
       tecnicoUid: input.tecnicoUid,
@@ -102,9 +94,7 @@ export async function actionStartExecution(
   input: { workOrderId: string },
 ): Promise<ActionResult<void>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, rolesWrite);
-    await assertUserCanAct(session.uid, [...rolesWrite]);
+    const session = await requirePermisoFromToken(idToken, "ot:iniciar_estado");
     await startExecution({ workOrderId: input.workOrderId, actorUid: session.uid });
   });
 }
@@ -114,9 +104,7 @@ export async function actionAddMaterial(
   input: { workOrderId: string; line: z.infer<typeof materialLineSchema> },
 ): Promise<ActionResult<string>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, rolesWrite);
-    await assertUserCanAct(session.uid, [...rolesWrite]);
+    const session = await requirePermisoFromToken(idToken, "ot:agregar_materiales");
     const line = materialLineSchema.parse(input.line);
     if (line.registrado_por_uid !== session.uid) {
       throw new AppError("FORBIDDEN", "registrado_por_uid debe coincidir con la sesión");
@@ -134,9 +122,7 @@ export async function actionRegisterEvidence(
   input: { workOrderId: string; meta: z.infer<typeof evidenciaSchema> },
 ): Promise<ActionResult<string>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, rolesWrite);
-    await assertUserCanAct(session.uid, [...rolesWrite]);
+    const session = await requirePermisoFromToken(idToken, "ot:completar_planilla");
     const meta = evidenciaSchema.parse(input.meta);
     if (meta.subido_por_uid !== session.uid) {
       throw new AppError("FORBIDDEN", "subido_por_uid debe coincidir con la sesión");
@@ -161,9 +147,7 @@ export async function actionSignTechnician(
   input: { workOrderId: string; firma: z.infer<typeof firmaSchema> },
 ): Promise<ActionResult<void>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, rolesWrite);
-    await assertUserCanAct(session.uid, [...rolesWrite]);
+    const session = await requirePermisoFromToken(idToken, "ot:firmar_cerrar");
     const firma = toFirmaDigital(firmaSchema.parse(input.firma));
     await signTechnician({ workOrderId: input.workOrderId, firma, actorUid: session.uid });
   });
@@ -174,9 +158,7 @@ export async function actionSignUsuario(
   input: { workOrderId: string; firma: z.infer<typeof firmaSchema> },
 ): Promise<ActionResult<void>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, rolesWrite);
-    await assertUserCanAct(session.uid, [...rolesWrite]);
+    const session = await requirePermisoFromToken(idToken, "ot:firmar_cerrar");
     const firma = toFirmaDigital(firmaSchema.parse(input.firma));
     await signUsuarioPlanta({ workOrderId: input.workOrderId, firma, actorUid: session.uid });
   });
@@ -187,9 +169,7 @@ export async function actionCloseWorkOrder(
   input: { workOrderId: string; motivo?: string },
 ): Promise<ActionResult<void>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, rolesClose);
-    await assertUserCanAct(session.uid, [...rolesClose]);
+    const session = await requirePermisoFromToken(idToken, "ot:cancelar_reasignar");
     await closeWorkOrderListaParaCierre({
       workOrderId: input.workOrderId,
       actorUid: session.uid,
@@ -219,9 +199,7 @@ export async function createWorkOrder(
   input: z.infer<typeof createWorkOrderSchema>,
 ): Promise<ActionResult<{ id: string }>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, ["supervisor", "admin"]);
-    await assertUserCanAct(session.uid, ["supervisor", "admin"]);
+    const session = await requirePermisoFromToken(idToken, "ot:crear_manual");
     const parsed = createWorkOrderSchema.parse(input);
     const fechaStr =
       parsed.fecha_inicio_programada != null && String(parsed.fecha_inicio_programada).trim().length
@@ -258,11 +236,9 @@ export async function updateWorkOrderStatus(
   input: z.infer<typeof updateStatusSchema>,
 ): Promise<ActionResult<void>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
     const parsed = updateStatusSchema.parse(input);
     if (parsed.status === "EN_CURSO") {
-      requireRole(session, rolesWrite);
-      await assertUserCanAct(session.uid, [...rolesWrite]);
+      const session = await requirePermisoFromToken(idToken, "ot:iniciar_estado");
       await applyWorkOrderVistaStatus({
         workOrderId: parsed.workOrderId,
         status: parsed.status as WorkOrderVistaStatus,
@@ -271,8 +247,7 @@ export async function updateWorkOrderStatus(
       return;
     }
     if (parsed.status === "CANCELADA") {
-      requireRole(session, ["supervisor", "admin"]);
-      await assertUserCanAct(session.uid, ["supervisor", "admin"]);
+      const session = await requirePermisoFromToken(idToken, "ot:cancelar_reasignar");
       await applyWorkOrderVistaStatus({
         workOrderId: parsed.workOrderId,
         status: "CANCELADA",
@@ -290,6 +265,7 @@ const materialOtSchema = z.object({
   unidad: z.string().min(1),
   origen: z.enum(["ARAUCO", "EXTERNO"]),
   observaciones: z.string().optional(),
+  catalogoIdConfirmado: z.string().optional(),
 });
 
 export async function addMaterialToOT(
@@ -297,14 +273,17 @@ export async function addMaterialToOT(
   input: { workOrderId: string; material: z.infer<typeof materialOtSchema> },
 ): Promise<ActionResult<{ id: string }>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, rolesWrite);
-    await assertUserCanAct(session.uid, [...rolesWrite]);
+    const session = await requirePermisoFromToken(idToken, "ot:agregar_materiales");
     const material = materialOtSchema.parse(input.material);
     const id = await addMaterialOtField({
       workOrderId: input.workOrderId,
       actorUid: session.uid,
-      ...material,
+      descripcion: material.descripcion,
+      cantidad: material.cantidad,
+      unidad: material.unidad,
+      origen: material.origen,
+      observaciones: material.observaciones,
+      catalogoIdConfirmado: material.catalogoIdConfirmado,
     });
     return { id };
   });
@@ -312,9 +291,10 @@ export async function addMaterialToOT(
 
 const closePadSchema = z.object({
   workOrderId: z.string(),
-  firmaUsuario: z.string().min(100),
+  /** Obligatoria si el centro exige firma de usuario (`centros/{id}.requiere_firma_usuario_cierre`). */
+  firmaUsuario: z.string().optional().default(""),
   firmaTecnico: z.string().min(100),
-  firmaUsuarioNombre: z.string().min(1).max(200),
+  firmaUsuarioNombre: z.string().max(200).optional().default(""),
   firmaTecnicoNombre: z.string().min(1).max(200),
 });
 
@@ -323,9 +303,7 @@ export async function closeWorkOrder(
   input: z.infer<typeof closePadSchema>,
 ): Promise<ActionResult<void>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, rolesWrite);
-    await assertUserCanAct(session.uid, [...rolesWrite]);
+    const session = await requirePermisoFromToken(idToken, "ot:firmar_cerrar");
     const parsed = closePadSchema.parse(input);
     await closeWorkOrderWithPadSignatures({
       workOrderId: parsed.workOrderId,
@@ -349,9 +327,7 @@ export async function updateChecklistItem(
   input: z.infer<typeof checklistSchema>,
 ): Promise<ActionResult<void>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, rolesWrite);
-    await assertUserCanAct(session.uid, [...rolesWrite]);
+    const session = await requirePermisoFromToken(idToken, "ot:completar_planilla");
     const parsed = checklistSchema.parse(input);
     await updateChecklistItemService({
       workOrderId: parsed.workOrderId,
@@ -372,9 +348,7 @@ export async function actionUpdateWorkOrderInforme(
   input: z.infer<typeof informeTextoSchema>,
 ): Promise<ActionResult<void>> {
   return wrap(async () => {
-    const session = await verifyIdTokenOrThrow(idToken);
-    requireRole(session, rolesWrite);
-    await assertUserCanAct(session.uid, [...rolesWrite]);
+    const session = await requirePermisoFromToken(idToken, "ot:completar_planilla");
     const parsed = informeTextoSchema.parse(input);
     await updateWorkOrderInformeText({
       workOrderId: parsed.workOrderId,

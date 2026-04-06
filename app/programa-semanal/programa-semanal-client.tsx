@@ -15,6 +15,7 @@ import { getIsoWeekId, shiftIsoWeekId } from "@/modules/scheduling/iso-week";
 import { parseProgramaSemanalWorkbook } from "@/modules/scheduling/parse-programa-excel";
 import type { WeeklyPlanRow, WeeklyScheduleSlot } from "@/modules/scheduling/types";
 import { useTodaysWorkOrdersCached } from "@/modules/work-orders/hooks";
+import { usePermisos } from "@/lib/permisos/usePermisos";
 import { getClientIdToken, useAuthUser, useUserProfile } from "@/modules/users/hooks";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Pencil, Trash2, Upload } from "lucide-react";
@@ -61,13 +62,14 @@ function groupPlanRowsByDay(rows: WeeklyPlanRow[], centro: string): Map<number, 
   return m;
 }
 
-export function ProgramaSemanalClient() {
+export function ProgramaSemanalClient({ embedded = false }: { embedded?: boolean }) {
   const { user, loading: authLoading } = useAuthUser();
   const { profile, loading: profileLoading } = useUserProfile(user?.uid);
+  const { puede } = usePermisos();
   const [weekId, setWeekId] = useState(() => getIsoWeekId(new Date()));
 
   const centro = profile?.centro ?? DEFAULT_CENTRO;
-  const canEdit = profile?.rol === "supervisor" || profile?.rol === "admin";
+  const canEdit = puede("programa:editar");
 
   const { slots, loading: slotsLoading, error: slotsError } = useWeeklySlotsLive(weekId, user?.uid);
   const {
@@ -75,7 +77,7 @@ export function ProgramaSemanalClient() {
     loading: planLoading,
     error: planError,
   } = useWeeklyPlanRowsLive(weekId, user?.uid);
-  const { rows: workOrders, loading: woLoading } = useTodaysWorkOrdersCached(centro);
+  const { rows: workOrders, loading: woLoading, error: woError } = useTodaysWorkOrdersCached(centro);
 
   const [workOrderId, setWorkOrderId] = useState("");
   const [dia, setDia] = useState<1 | 2 | 3 | 4 | 5 | 6 | 7>(1);
@@ -281,41 +283,81 @@ export function ProgramaSemanalClient() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className={embedded ? "space-y-4" : "space-y-6"}>
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Programa semanal</h1>
-          <p className="text-sm text-muted-foreground">
-            Centro <span className="font-mono">{centro}</span>
-            {profile?.rol ? ` · ${profile.rol}` : null}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-9 w-9 p-0"
-            aria-label="Semana anterior"
-            onClick={() => setWeekId((w) => shiftIsoWeekId(w, -1))}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="min-w-[7.5rem] text-center font-mono text-lg font-semibold">{weekId}</span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-9 w-9 p-0"
-            aria-label="Semana siguiente"
-            onClick={() => setWeekId((w) => shiftIsoWeekId(w, 1))}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={() => setWeekId(getIsoWeekId(new Date()))}>
-            Hoy
-          </Button>
-        </div>
+        {embedded ? (
+          <>
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight">OT en calendario · texto · Excel</h2>
+              <p className="text-xs text-muted-foreground">
+                Centro <span className="font-mono">{centro}</span>
+                {profile?.rol ? ` · ${profile.rol}` : null}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 w-9 p-0"
+                aria-label="Semana anterior"
+                onClick={() => setWeekId((w) => shiftIsoWeekId(w, -1))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="min-w-[7.5rem] text-center font-mono text-base font-semibold">{weekId}</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 w-9 p-0"
+                aria-label="Semana siguiente"
+                onClick={() => setWeekId((w) => shiftIsoWeekId(w, 1))}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setWeekId(getIsoWeekId(new Date()))}>
+                Hoy
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">Programa semanal</h1>
+              <p className="text-sm text-muted-foreground">
+                Centro <span className="font-mono">{centro}</span>
+                {profile?.rol ? ` · ${profile.rol}` : null}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 w-9 p-0"
+                aria-label="Semana anterior"
+                onClick={() => setWeekId((w) => shiftIsoWeekId(w, -1))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="min-w-[7.5rem] text-center font-mono text-lg font-semibold">{weekId}</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 w-9 p-0"
+                aria-label="Semana siguiente"
+                onClick={() => setWeekId((w) => shiftIsoWeekId(w, 1))}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setWeekId(getIsoWeekId(new Date()))}>
+                Hoy
+              </Button>
+            </div>
+          </>
+        )}
       </div>
 
       {msg ? (
@@ -347,9 +389,36 @@ export function ProgramaSemanalClient() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Agendar OT</CardTitle>
-              <CardDescription>Solo supervisores y administradores pueden editar el programa.</CardDescription>
+              <CardDescription className="space-y-1.5">
+                <span>
+                  Solo supervisores y administradores pueden editar el programa. Acá elegís una{" "}
+                  <strong>orden de trabajo que ya exista</strong> en el sistema (colección de tareas/OT) para asignarla
+                  a un día de esta semana. No es el mismo flujo que importar texto desde Excel: es enlazar una OT
+                  concreta al calendario.
+                </span>
+              </CardDescription>
             </CardHeader>
-            <CardContent className="flex flex-wrap items-end gap-3">
+            <CardContent className="space-y-3">
+              {woError ? (
+                <p className="text-sm text-destructive" role="alert">
+                  No se pudieron cargar las órdenes de trabajo: {woError.message}
+                  {(woError as { code?: string }).code === "permission-denied"
+                    ? ". Revisá reglas de Firestore para la colección work_orders."
+                    : null}
+                </p>
+              ) : null}
+              {!woLoading && !woError && scheduleableWos.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No hay OTs elegibles para <span className="font-mono">{centro}</span>: o no hay tareas en las últimas
+                  cargadas, o todas están cerradas/anuladas/en borrador, o el campo <span className="font-mono">centro</span>{" "}
+                  de las OT no coincide. Podés revisar en{" "}
+                  <Link href="/tareas" className="font-medium text-primary underline underline-offset-2">
+                    Tareas
+                  </Link>{" "}
+                  y crear o reabrir OTs según tu proceso.
+                </p>
+              ) : null}
+              <div className="flex flex-wrap items-end gap-3">
               <label className="flex min-w-[12rem] flex-col gap-1 text-sm">
                 Orden de trabajo
                 <select
@@ -398,6 +467,7 @@ export function ProgramaSemanalClient() {
               <Button type="button" onClick={() => void onAdd()} disabled={busy || woLoading}>
                 Agregar al programa
               </Button>
+              </div>
             </CardContent>
           </Card>
 

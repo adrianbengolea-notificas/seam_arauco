@@ -84,6 +84,19 @@ export async function adminSetUserActivo(uid: string, activo: boolean): Promise<
   });
 }
 
+export async function adminUpdateUserPushSubscription(
+  uid: string,
+  patch: { pushSubscription?: Record<string, unknown> | null; pushHabilitado?: boolean },
+): Promise<void> {
+  await getAdminDb()
+    .collection(USERS_COLLECTION)
+    .doc(uid)
+    .update({
+      ...patch,
+      updated_at: FieldValue.serverTimestamp(),
+    } as Record<string, unknown>);
+}
+
 export async function getUserProfileByUid(uid: string): Promise<UserProfile | null> {
   const snap = await getAdminDb().collection(USERS_COLLECTION).doc(uid).get();
   if (!snap.exists) return null;

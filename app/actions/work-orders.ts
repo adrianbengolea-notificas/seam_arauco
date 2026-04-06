@@ -2,6 +2,12 @@
 
 import { failure, success, type ActionResult } from "@/lib/actions/action-result";
 import { AppError, isAppError } from "@/lib/errors/app-error";
+import { crearNotificacionSeguro } from "@/lib/notificaciones/crear-notificacion";
+import {
+  destinatariosAdminsCentro,
+  destinatariosClienteArauco,
+  destinatariosSupervisoresAdmin,
+} from "@/lib/notificaciones/destinatarios";
 import { requirePermisoFromToken } from "@/lib/permisos/server";
 import type { FirmaDigital } from "@/modules/work-orders/types";
 import {
@@ -20,6 +26,8 @@ import {
   updateChecklistItemService,
   updateWorkOrderInformeText,
 } from "@/modules/work-orders/service";
+import { getAvisoById } from "@/modules/notices/repository";
+import { getWorkOrderById } from "@/modules/work-orders/repository";
 import type { WorkOrderVistaStatus } from "@/modules/work-orders/types";
 import { Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
@@ -222,6 +230,26 @@ export async function createWorkOrder(
       ubicacion_tecnica: parsed.ubicacion_tecnica,
       denom_ubic_tecnica: parsed.denom_ubic_tecnica,
     });
+
+    if (parsed.aviso_id) {
+      const aviso = await getAvisoById(parsed.aviso_id);
+      if (aviso?.urgente === true) {
+        const wo = await getWorkOrderById(id);
+        if (wo) {
+          const dest = [
+            ...(await destinatariosClienteArauco(wo.centro)),
+            ...(await destinatariosSupervisoresAdmin(wo.centro)),
+          ];
+          crearNotificacionSeguro(dest, {
+            tipo: "ot_urgente_abierta",
+            titulo: `OT urgente abierta · #${wo.n_ot}`,
+            cuerpo: wo.texto_trabajo.trim().slice(0, 280),
+            otId: wo.id,
+          });
+        }
+      }
+    }
+
     return { id };
   });
 }
@@ -285,6 +313,22 @@ export async function addMaterialToOT(
       observaciones: material.observaciones,
       catalogoIdConfirmado: material.catalogoIdConfirmado,
     });
+    if (material.origen === "EXTERNO") {
+      const wo = await getWorkOrderById(input.workOrderId);
+      if (wo) {
+        const dest = [
+          ...(await destinatariosClienteArauco(wo.centro)),
+          ...(await destinatariosAdminsCentro(wo.centro)),
+        ];
+        crearNotificacionSeguro(dest, {
+          tipo: "material_externo_cargado",
+          titulo: `Material externo cargado · OT #${wo.n_ot}`,
+          cuerpo: `${material.descripcion} · ${material.cantidad} ${material.unidad}`,
+          otId: wo.id,
+          materialId: id,
+        });
+      }
+    }
     return { id };
   });
 }
@@ -313,6 +357,19 @@ export async function closeWorkOrder(
       firma_usuario_nombre: parsed.firmaUsuarioNombre,
       firma_tecnico_nombre: parsed.firmaTecnicoNombre,
     });
+    const wo = await getWorkOrderById(parsed.workOrderId);
+    if (wo) {
+      const dest = [
+        ...(await destinatariosClienteArauco(wo.centro)),
+        ...(await destinatariosSupervisoresAdmin(wo.centro)),
+      ];
+      crearNotificacionSeguro(dest, {
+        tipo: "ot_cerrada_firmada",
+        titulo: `OT #${wo.n_ot} cerrada y firmada`,
+        cuerpo: wo.texto_trabajo.trim().slice(0, 280),
+        otId: wo.id,
+      });
+    }
   });
 }
 

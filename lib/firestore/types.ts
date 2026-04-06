@@ -1,4 +1,5 @@
 import type { Timestamp } from "firebase/firestore";
+import type { Rol } from "@/lib/permisos/index";
 
 /**
  * Tipos de referencia para imports (seed) y documentación.
@@ -186,4 +187,44 @@ export interface PlanillaRespuesta {
   completadoPor: string;
   completadoAt?: Timestamp;
   creadoAt: Timestamp;
+}
+
+/** Comentario en `work_orders/{otId}/comentarios/{id}` */
+export interface Comentario {
+  id: string;
+  otId: string;
+  texto: string;
+  autorId: string;
+  autorNombre: string;
+  autorRol: Rol;
+  adjuntos?: string[];
+  respondidoA?: string;
+  /** Compat: lectura agregada; preferir `leidoPor`. */
+  leido: boolean;
+  /** Lectura por usuario (uid → visto). */
+  leidoPor?: Record<string, boolean>;
+  creadoAt: Timestamp;
+}
+
+export type NotificacionTipo =
+  | "ot_urgente_abierta"
+  | "ot_cerrada_firmada"
+  | "material_externo_cargado"
+  | "comentario_nuevo"
+  | "comentario_respondido"
+  | "stock_bajo"
+  | "ot_asignada"
+  | "ot_vencida";
+
+/** Ítem en `notificaciones/{uid}/items/{id}` */
+export interface Notificacion {
+  id: string;
+  tipo: NotificacionTipo;
+  titulo: string;
+  cuerpo: string;
+  leida: boolean;
+  otId?: string;
+  materialId?: string;
+  creadoAt: Timestamp;
+  pushEnviado: boolean;
 }

@@ -19,6 +19,7 @@ import {
 } from "@/modules/work-orders/types";
 import { useAuth } from "@/modules/users/hooks";
 import { usePermisos } from "@/lib/permisos/usePermisos";
+import { toPermisoRol } from "@/lib/permisos/index";
 import { ChevronDown, ChevronRight, Plus } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -187,6 +188,8 @@ export function TareasPageClient() {
   }, [ots, tab]);
 
   const puedeCrearOt = puede("programa:crear_ot");
+  const esCliente = toPermisoRol(profile?.rol) === "cliente_arauco";
+  const homeHref = esCliente ? "/cliente" : "/dashboard";
 
   return (
     <div className="space-y-4 pb-24">
@@ -269,7 +272,7 @@ export function TareasPageClient() {
 
       <div className="pt-4">
         <Button variant="outline" asChild>
-          <Link href="/dashboard">Volver al panel</Link>
+          <Link href={homeHref}>Volver al panel</Link>
         </Button>
       </div>
     </div>

@@ -18,8 +18,9 @@ import { isSuperAdminRole } from "@/modules/users/roles";
 import type { UserRole } from "@/modules/users/types";
 import { toPermisoRol } from "@/lib/permisos/index";
 
-type RolAssignable = "tecnico" | "supervisor" | "admin" | "superadmin";
 import Link from "next/link";
+
+type RolAssignable = "tecnico" | "supervisor" | "admin" | "superadmin" | "cliente_arauco";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const selectClass = cn(
@@ -37,6 +38,8 @@ function roleLabel(rol: UserRole): string {
       return "Admin";
     case "supervisor":
       return "Supervisor";
+    case "cliente_arauco":
+      return "Cliente Arauco";
     default:
       return "Técnico";
   }
@@ -47,6 +50,7 @@ function roleBadgeClass(rol: UserRole): string {
   if (r === "superadmin") return "bg-violet-600/15 text-violet-800 dark:text-violet-200";
   if (r === "admin") return "bg-amber-600/15 text-amber-900 dark:text-amber-100";
   if (r === "supervisor") return "bg-sky-600/15 text-sky-900 dark:text-sky-100";
+  if (r === "cliente_arauco") return "bg-emerald-600/15 text-emerald-900 dark:text-emerald-100";
   return "bg-zinc-500/15 text-zinc-800 dark:text-zinc-200";
 }
 
@@ -91,8 +95,8 @@ export function GestionUsuariosClient() {
 
   const assignableRoles: RolAssignable[] = useMemo(() => {
     return viewerIsSuper
-      ? ["tecnico", "supervisor", "admin", "superadmin"]
-      : ["tecnico", "supervisor", "admin"];
+      ? ["tecnico", "supervisor", "admin", "superadmin", "cliente_arauco"]
+      : ["tecnico", "supervisor", "admin", "cliente_arauco"];
   }, [viewerIsSuper]);
 
   async function saveRol() {
@@ -368,8 +372,8 @@ function AltaUsuarioForm({
   const [localMsg, setLocalMsg] = useState<string | null>(null);
 
   const roles: RolAssignable[] = viewerIsSuper
-    ? ["tecnico", "supervisor", "admin", "superadmin"]
-    : ["tecnico", "supervisor", "admin"];
+    ? ["tecnico", "supervisor", "admin", "superadmin", "cliente_arauco"]
+    : ["tecnico", "supervisor", "admin", "cliente_arauco"];
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();

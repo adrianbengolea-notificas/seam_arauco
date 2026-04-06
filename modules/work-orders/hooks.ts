@@ -4,7 +4,7 @@ import { getFirebaseDb } from "@/firebase/firebaseClient";
 import { cacheWorkOrdersForDay, dayKeyFromDate, loadCachedWorkOrdersForDay } from "@/lib/offline/ot-db";
 import type { MaterialLineWorkOrder, MaterialOtListRow } from "@/modules/materials/types";
 import type { Especialidad } from "@/modules/notices/types";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { COLLECTIONS, WORK_ORDER_SUB } from "@/lib/firestore/collections";
 import type { Equipo, PlanillaRespuesta, PlanillaTemplate } from "@/lib/firestore/types";
 import type {
   ChecklistItem,
@@ -14,6 +14,7 @@ import type {
   WorkOrderVistaStatus,
 } from "@/modules/work-orders/types";
 import { workOrderVistaStatus } from "@/modules/work-orders/types";
+import type { Comentario } from "@/lib/firestore/types";
 import {
   collection,
   doc,
@@ -164,11 +165,13 @@ export function useWorkOrdersByEspecialidad(
             where("tecnico_asignado_uid", "==", viewer.uid),
             limit(600),
           )
-        : viewerRol === "superadmin" && !centro
-          ? query(col, limit(600))
-          : centro
-            ? query(col, where("centro", "==", centro), limit(600))
-            : null;
+        : viewerRol === "cliente_arauco" && centro
+          ? query(col, where("centro", "==", centro), limit(600))
+          : viewerRol === "superadmin" && !centro
+            ? query(col, limit(600))
+            : centro
+              ? query(col, where("centro", "==", centro), limit(600))
+              : null;
 
     if (!q) {
       setOts([]);
@@ -455,4 +458,45 @@ export function useEquipoByCodigo(codigo: string | undefined): {
   }, [codigo]);
 
   return { equipo, loading, error };
+}
+
+export function useComentariosOT(otId: string | undefined): {
+  comentarios: Comentario[];
+  loading: boolean;
+  error: Error | null;
+} {
+  const [comentarios, setComentarios] = useState<Comentario[]>([]);
+  const [loading, setLoading] = useState(Boolean(otId));
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    if (!otId) {
+      setComentarios([]);
+      setLoading(false);
+      return;
+    }
+    const db = getFirebaseDb();
+    const q = query(
+      collection(db, COLLECTIONS.work_orders, otId, WORK_ORDER_SUB.comentarios),
+      orderBy("creadoAt", "asc"),
+    );
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const rows = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<Comentario, "id">),
+        }));
+        setComentarios(rows);
+        setLoading(false);
+      },
+      (err) => {
+        setError(err);
+        setLoading(false);
+      },
+    );
+    return () => unsub();
+  }, [otId]);
+
+  return { comentarios, loading, error };
 }

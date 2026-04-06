@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { useCentroConfigLive } from "@/modules/centros/hooks";
 import { useAuthUser, useUserProfile } from "@/modules/users/hooks";
 import { PermisoGuard } from "@/components/auth/PermisoGuard";
+import { usePermisos } from "@/lib/permisos/usePermisos";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo } from "react";
@@ -19,24 +20,32 @@ const links = [
 function pathMatches(href: string, pathname: string | null): boolean {
   if (!pathname) return false;
   if (href === "/dashboard") return pathname === "/dashboard";
+  if (href === "/cliente") return pathname === "/cliente" || pathname.startsWith("/cliente/");
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 export function AppMainNav() {
   const pathname = usePathname();
   const { user } = useAuthUser();
+  const { rol } = usePermisos();
   const profileUid =
     pathname === "/login" || pathname?.startsWith("/login/") ? undefined : user?.uid;
   const { profile } = useUserProfile(profileUid);
   const { config: centroConfig } = useCentroConfigLive(profile?.centro);
 
   const navLinks = useMemo(() => {
-    return links.filter((l) => {
+    let list = links.filter((l) => {
       if (l.module === "materiales") return centroConfig.modulos.materiales;
       if (l.module === "activos") return centroConfig.modulos.activos;
       return true;
     });
-  }, [centroConfig.modulos.activos, centroConfig.modulos.materiales]);
+    if (rol === "cliente_arauco") {
+      list = list
+        .filter((l) => l.href !== "/materiales")
+        .map((l) => (l.href === "/dashboard" ? { ...l, href: "/cliente", label: "Inicio" } : l));
+    }
+    return list;
+  }, [centroConfig.modulos.activos, centroConfig.modulos.materiales, rol]);
 
   const linkClass = (active: boolean) =>
     cn(

@@ -12,6 +12,8 @@ const TITLES: Record<HistorialEventoTipo, string> = {
   INFORME_ACTUALIZADO: "Informe actualizado",
   PLANILLA_INICIADA: "Planilla iniciada",
   PLANILLA_FIRMADA: "Planilla firmada",
+  COMENTARIO: "Comentario",
+  MATERIAL_NORMALIZADO_IA: "Material (normalización interna)",
 };
 
 export function historialEventoTitulo(tipo: HistorialEventoTipo): string {
@@ -45,6 +47,10 @@ export function historialEventoResumen(ev: WorkOrderHistorialEvent): string {
       return `template ${String(p.templateId ?? "")} · resp ${String(p.respuestaId ?? "")}`;
     case "PLANILLA_FIRMADA":
       return `resp ${String(p.respuestaId ?? "")}`;
+    case "COMENTARIO":
+      return String(p.texto ?? p.comentarioId ?? "");
+    case "MATERIAL_NORMALIZADO_IA":
+      return String(p.lineId ?? "");
     default:
       return "";
   }

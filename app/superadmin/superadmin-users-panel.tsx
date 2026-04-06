@@ -29,6 +29,7 @@ const ROLE_LABEL: Record<UserRole, string> = {
   admin: "Admin de planta",
   superadmin: "Superadmin",
   super_admin: "Superadmin (legado)",
+  cliente_arauco: "Cliente Arauco",
 };
 
 export function SuperadminUsersPanel() {

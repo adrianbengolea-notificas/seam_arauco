@@ -214,7 +214,9 @@ export type HistorialEventoTipo =
   | "CIERRE"
   | "INFORME_ACTUALIZADO"
   | "PLANILLA_INICIADA"
-  | "PLANILLA_FIRMADA";
+  | "PLANILLA_FIRMADA"
+  | "COMENTARIO"
+  | "MATERIAL_NORMALIZADO_IA";
 
 export type WorkOrderHistorialEvent = {
   id: string;

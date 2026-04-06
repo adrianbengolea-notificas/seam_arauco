@@ -1,4 +1,4 @@
-export type Rol = "tecnico" | "supervisor" | "admin" | "superadmin";
+export type Rol = "tecnico" | "supervisor" | "admin" | "superadmin" | "cliente_arauco";
 
 export type Permiso =
   | "programa:ver"
@@ -31,7 +31,17 @@ export type Permiso =
   | "admin:feature_flags"
   | "admin:cargar_programa"
   | "admin:auditoria"
-  | "admin:modo_mantenimiento";
+  | "admin:modo_mantenimiento"
+  | "comentarios:crear"
+  | "comentarios:ver"
+  | "notificaciones:recibir"
+  | "cliente:ver_dashboard"
+  | "cliente:ver_ots"
+  | "cliente:ver_programa"
+  | "cliente:ver_activos"
+  | "cliente:descargar_pdf";
+
+const NOTIF_RECIBIR: Permiso = "notificaciones:recibir";
 
 const TECNICO: Permiso[] = [
   "programa:ver",
@@ -46,6 +56,7 @@ const TECNICO: Permiso[] = [
   "activos:ver",
   "activos:escanear_qr",
   "historial:ver_propios",
+  NOTIF_RECIBIR,
 ];
 
 const SUPERVISOR_EXTRA: Permiso[] = [
@@ -60,6 +71,8 @@ const SUPERVISOR_EXTRA: Permiso[] = [
   "historial:informe_ia",
   /** Alineado con Firestore `assets`: supervisores pueden crear/editar. */
   "activos:crear_editar",
+  "comentarios:crear",
+  "comentarios:ver",
 ];
 
 const ADMIN_EXTRA: Permiso[] = [
@@ -77,7 +90,19 @@ const SUPERADMIN_EXTRA: Permiso[] = [
   "admin:modo_mantenimiento",
 ];
 
+const CLIENTE_ARAUCO: Permiso[] = [
+  "cliente:ver_dashboard",
+  "cliente:ver_ots",
+  "cliente:ver_programa",
+  "cliente:ver_activos",
+  "cliente:descargar_pdf",
+  "comentarios:crear",
+  "comentarios:ver",
+  NOTIF_RECIBIR,
+];
+
 export const PERMISOS_POR_ROL: Record<Rol, Permiso[]> = {
+  cliente_arauco: CLIENTE_ARAUCO,
   tecnico: [...TECNICO],
   supervisor: [...TECNICO, ...SUPERVISOR_EXTRA],
   admin: [...TECNICO, ...SUPERVISOR_EXTRA, ...ADMIN_EXTRA],
@@ -90,6 +115,7 @@ export function tienePermiso(rol: Rol, permiso: Permiso): boolean {
 }
 
 export const JERARQUIA_ROL: Record<Rol, number> = {
+  cliente_arauco: 0,
   tecnico: 1,
   supervisor: 2,
   admin: 3,
@@ -105,5 +131,6 @@ export function toPermisoRol(rol: string | undefined | null): Rol {
   if (rol === "super_admin" || rol === "superadmin") return "superadmin";
   if (rol === "admin") return "admin";
   if (rol === "supervisor") return "supervisor";
+  if (rol === "cliente_arauco") return "cliente_arauco";
   return "tecnico";
 }

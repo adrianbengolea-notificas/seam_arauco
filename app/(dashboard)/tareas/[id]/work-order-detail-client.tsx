@@ -1,6 +1,6 @@
 "use client";
 
-import { iniciarPlanilla } from "@/app/actions/planillas";
+import { firmarPlanilla, guardarBorradorPlanilla, iniciarPlanilla } from "@/app/actions/planillas";
 import {
   addMaterialToOT,
   closeWorkOrder,
@@ -15,6 +15,7 @@ import { useOfflineSync } from "@/hooks/use-offline-sync";
 import { useOnlineStatus } from "@/hooks/use-online";
 import { enqueueOutbox } from "@/lib/offline/ot-db";
 import { cn } from "@/lib/utils";
+import { usePermisos } from "@/lib/permisos/usePermisos";
 import type { MaterialCatalogItem, MaterialOtListRow } from "@/modules/materials/types";
 import { useMaterialSearch, useMaterialsCatalogLive } from "@/modules/materials/hooks";
 import { useCentroConfigLive } from "@/modules/centros/hooks";
@@ -39,10 +40,11 @@ import {
 import { planillaProgreso } from "@/lib/planillas/form-utils";
 import { selectTemplate } from "@/lib/planillas/select-template";
 import { SignaturePad } from "@/modules/signatures/components/SignaturePad";
-import { getClientIdToken } from "@/modules/users/hooks";
+import { getClientIdToken, useAuthUser } from "@/modules/users/hooks";
 import { Download } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { WorkOrderComentariosSection } from "@/app/(dashboard)/tareas/[id]/work-order-comentarios";
 
 function vistaLabel(s: WorkOrderVistaStatus): string {
   switch (s) {
@@ -83,9 +85,9 @@ function etiquetaPlanillaTemplate(id: string): string {
   }
 }
 
-function materialLabel(m: MaterialOtListRow): string {
+function materialLabel(m: MaterialOtListRow, esCliente?: boolean): string {
   if (m._kind === "field") {
-    const tag = m.normalizacion ? ` · ${m.normalizacion}` : "";
+    const tag = !esCliente && m.normalizacion ? ` · ${m.normalizacion}` : "";
     const cod = m.codigo_material ? ` · ${m.codigo_material}` : "";
     return `${m.descripcion} · ${m.cantidad} ${m.unidad} (${m.origen})${cod}${tag}`;
   }
@@ -93,6 +95,9 @@ function materialLabel(m: MaterialOtListRow): string {
 }
 
 export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) {
+  const { user } = useAuthUser();
+  const { rol, puede } = usePermisos();
+  const esCliente = rol === "cliente_arauco";
   const { workOrder, loading, error } = useWorkOrderLive(workOrderId);
   const { materials, loading: matLoading } = useWorkOrderMaterials(workOrderId);
   const { items: checklistItems, loading: clLoading } = useWorkOrderChecklist(workOrderId);
@@ -176,6 +181,36 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
         };
         const res = await addMaterialToOT(t, p);
         if (!res.ok) throw new Error(res.error.message);
+        return;
+      }
+      if (type === "planilla_borrador") {
+        const p = payload as {
+          otId: string;
+          respuestaId: string;
+          datos: Parameters<typeof guardarBorradorPlanilla>[1]["datos"];
+        };
+        const res = await guardarBorradorPlanilla(t, p);
+        if (!res.ok) throw new Error(res.error.message);
+        return;
+      }
+      if (type === "planilla_firmar") {
+        const p = payload as {
+          otId: string;
+          respuestaId: string;
+          firmas: {
+            firmaUsuario: string;
+            firmaUsuarioNombre: string;
+            firmaUsuarioLegajo: string;
+            firmaResponsable: string;
+            firmaResponsableNombre: string;
+          };
+        };
+        const res = await firmarPlanilla(t, {
+          otId: p.otId,
+          respuestaId: p.respuestaId,
+          firmas: p.firmas,
+        });
+        if (!res.ok) throw new Error(res.error.message);
       }
     },
     [],
@@ -195,6 +230,11 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
       return it.respuesta_boolean === true;
     }).length;
   }, [checklistItems, localCheck]);
+
+  const historialVisible = useMemo(() => {
+    if (!esCliente) return historialEvents;
+    return historialEvents.filter((ev) => ev.tipo !== "MATERIAL_NORMALIZADO_IA");
+  }, [esCliente, historialEvents]);
 
   async function token(): Promise<string> {
     const t = await getClientIdToken();
@@ -332,7 +372,7 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
     const header = ["n_ot", "fecha", "tipo", "titulo", "actor_uid", "resumen", "payload_json"];
     const dataRows: string[][] = [
       header,
-      ...historialEvents.map((ev) => [
+      ...historialVisible.map((ev) => [
         workOrder.n_ot,
         formatFirestoreDate(ev.created_at),
         ev.tipo,
@@ -389,9 +429,11 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
   if (error) return <p className="text-sm text-red-600">{error.message}</p>;
   if (!workOrder) return <p className="text-sm text-zinc-600">OT no encontrada.</p>;
 
-  const puedeIniciar = vista === "PENDIENTE";
-  const puedeCompletar = vista === "EN_CURSO";
+  const puedeIniciar = vista === "PENDIENTE" && !esCliente;
+  const puedeCompletar = vista === "EN_CURSO" && !esCliente;
   const cerrada = vista === "COMPLETADA";
+  const puedePdf =
+    cerrada && (puede("ot:descargar_pdf") || puede("cliente:descargar_pdf"));
 
   return (
     <div className="space-y-6 pb-24">
@@ -420,11 +462,13 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
       ) : null}
 
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" onClick={() => downloadHistorialCsv()}>
-          <Download className="mr-2 h-4 w-4" />
-          CSV historial
-        </Button>
-        {cerrada ? (
+        {!esCliente ? (
+          <Button type="button" variant="outline" onClick={() => downloadHistorialCsv()}>
+            <Download className="mr-2 h-4 w-4" />
+            CSV historial
+          </Button>
+        ) : null}
+        {puedePdf ? (
           <Button type="button" variant="outline" onClick={() => void downloadPdf()}>
             <Download className="mr-2 h-4 w-4" />
             Descargar PDF
@@ -485,12 +529,19 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
           </div>
 
           <div className="pt-4">
-            <WorkOrderInformeForm
-              key={`${workOrder.id}-${workOrder.updated_at?.toMillis?.() ?? 0}`}
-              workOrder={workOrder}
-              onMessage={setMsg}
-              iaEnabled={centroCfg.modulos.ia}
-            />
+            {esCliente ? (
+              <div className="space-y-1 rounded-md border border-zinc-200 bg-zinc-50/80 p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+                <p className="text-xs font-medium text-zinc-500">Trabajo / informe</p>
+                <p className="whitespace-pre-wrap text-foreground">{workOrder.texto_trabajo}</p>
+              </div>
+            ) : (
+              <WorkOrderInformeForm
+                key={`${workOrder.id}-${workOrder.updated_at?.toMillis?.() ?? 0}`}
+                workOrder={workOrder}
+                onMessage={setMsg}
+                iaEnabled={centroCfg.modulos.ia}
+              />
+            )}
           </div>
         </CardContent>
       </Card>
@@ -527,7 +578,7 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
                       type="checkbox"
                       className="mt-1 h-4 w-4"
                       checked={checked}
-                      disabled={cerrada || vista === "CANCELADA"}
+                      disabled={esCliente || cerrada || vista === "CANCELADA"}
                       onChange={(e) => void toggleCheck(it.id, e.target.checked, serverVal)}
                     />
                     <span className="text-sm leading-snug">{it.descripcion}</span>
@@ -551,12 +602,12 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-          {!planillaResp && !cerrada && vista !== "CANCELADA" ? (
+          {!esCliente && !planillaResp && !cerrada && vista !== "CANCELADA" ? (
             <Button type="button" className="min-h-11" onClick={() => void onIniciarPlanilla()}>
               Iniciar planilla {etiquetaPlanillaTemplate(planillaTemplateIdEsperado)}
             </Button>
           ) : null}
-          {planillaResp && planillaResp.status !== "firmada" && !cerrada && vista !== "CANCELADA" ? (
+          {!esCliente && planillaResp && planillaResp.status !== "firmada" && !cerrada && vista !== "CANCELADA" ? (
             <Button
               type="button"
               variant="secondary"
@@ -564,6 +615,11 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
               onClick={() => setPlanillaOpen(true)}
             >
               Continuar planilla ({planillaProgresoPct}%)
+            </Button>
+          ) : null}
+          {esCliente && planillaResp ? (
+            <Button type="button" variant="outline" className="min-h-11" onClick={() => setPlanillaOpen(true)}>
+              Ver planilla
             </Button>
           ) : null}
           {planillaResp?.status === "firmada" ? (
@@ -591,7 +647,9 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
             ot={workOrder}
             equipo={equipoCatalogo}
             respuestaInicial={planillaResp}
-            readOnly={planillaResp.status === "firmada" || cerrada || vista === "CANCELADA"}
+            readOnly={
+              esCliente || planillaResp.status === "firmada" || cerrada || vista === "CANCELADA"
+            }
             onCerrar={() => setPlanillaOpen(false)}
           />
         ) : (
@@ -613,11 +671,11 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
           <ul className="space-y-2 text-sm">
             {materials.map((m) => (
               <li key={m.id} className="rounded-md border border-zinc-100 px-2 py-1 dark:border-zinc-800">
-                {materialLabel(m)}
+                {materialLabel(m, esCliente)}
               </li>
             ))}
           </ul>
-          {!cerrada && vista !== "CANCELADA" ? (
+          {!esCliente && !cerrada && vista !== "CANCELADA" ? (
             <>
               <Button type="button" variant="outline" size="sm" onClick={() => setMatOpen((o) => !o)}>
                 + Agregar material
@@ -649,7 +707,13 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
                             >
                               <span className="font-medium text-foreground">{it.descripcion}</span>
                               <span className="text-xs text-zinc-500">
-                                {it.codigo_material} · Stock: {it.stock_disponible ?? "—"} {it.unidad_medida}
+                                {it.codigo_material}
+                                {esCliente ? null : (
+                                  <>
+                                    {" "}
+                                    · Stock: {it.stock_disponible ?? "—"} {it.unidad_medida}
+                                  </>
+                                )}
                               </span>
                             </button>
                           </li>
@@ -657,11 +721,11 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
                       </ul>
                     ) : null}
                   </div>
-                  {matCatalogPick ? (
+                  {matCatalogPick && !esCliente ? (
                     <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
                       Del catálogo — el stock se actualizará al guardar
                     </p>
-                  ) : centroCfg.modulos.ia && matDesc.trim().length >= 2 ? (
+                  ) : !esCliente && centroCfg.modulos.ia && matDesc.trim().length >= 2 ? (
                     <p className="text-xs text-zinc-500">La IA intentará mapear el texto al catálogo en segundo plano</p>
                   ) : null}
                   <div className="grid grid-cols-2 gap-2">
@@ -695,15 +759,15 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
         <CardHeader>
           <CardTitle>Historial</CardTitle>
           <CardDescription>
-            {histLoading ? "Cargando…" : `${historialEvents.length} eventos · sincronizado en vivo`}
+            {histLoading ? "Cargando…" : `${historialVisible.length} eventos · sincronizado en vivo`}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {!historialEvents.length && !histLoading ? (
+          {!historialVisible.length && !histLoading ? (
             <p className="text-sm text-zinc-500">Sin eventos aún.</p>
           ) : (
             <ul className="relative space-y-0 border-l-2 border-zinc-200 pl-4 dark:border-zinc-700">
-              {historialEvents.map((ev) => (
+              {historialVisible.map((ev) => (
                 <li key={ev.id} className="relative pb-6 last:pb-0">
                   <span className="absolute -left-[9px] top-1.5 h-3 w-3 rounded-full bg-zinc-400 ring-4 ring-white dark:bg-zinc-500 dark:ring-zinc-950" />
                   <p className="text-xs font-medium text-zinc-500">
@@ -712,13 +776,22 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
                   <p className="mt-0.5 text-sm text-foreground">
                     {historialEventoResumen(ev) || JSON.stringify(ev.payload ?? {})}
                   </p>
-                  <p className="mt-0.5 font-mono text-[10px] text-zinc-400">{ev.actor_uid}</p>
+                  {!esCliente ? (
+                    <p className="mt-0.5 font-mono text-[10px] text-zinc-400">{ev.actor_uid}</p>
+                  ) : null}
                 </li>
               ))}
             </ul>
           )}
         </CardContent>
       </Card>
+
+      <WorkOrderComentariosSection
+        otId={workOrderId}
+        viewerUid={user?.uid}
+        puedeComentar={puede("comentarios:crear")}
+        esCliente={esCliente}
+      />
 
       {cerrarOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-4 sm:items-center">

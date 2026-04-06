@@ -4,8 +4,23 @@ import { getFirebaseAuth, getFirebaseDb } from "@/firebase/firebaseClient";
 import type { UserProfile } from "@/modules/users/types";
 import type { User } from "firebase/auth";
 import { onAuthStateChanged, type Unsubscribe } from "firebase/auth";
-import { collection, doc, limit, onSnapshot, query, where, type Unsubscribe as FirestoreUnsub } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import {
+  NOTIFICACIONES_COLLECTION,
+  NOTIFICACIONES_ITEMS_SUBCOLLECTION,
+} from "@/lib/firestore/collections";
+import type { Notificacion } from "@/lib/firestore/types";
+import {
+  collection,
+  doc,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+  type Unsubscribe as FirestoreUnsub,
+} from "firebase/firestore";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { marcarNotificacionLeida, marcarTodasNotificacionesLeidas } from "@/app/actions/notificaciones";
 import { tienePermiso, toPermisoRol } from "@/lib/permisos/index";
 import { isSuperAdminRole } from "@/modules/users/roles";
 import type { UserProfileWithUid } from "@/modules/users/repository";
@@ -144,5 +159,70 @@ export function useUsers(filters?: { rol?: string; activo?: boolean | null }): {
   }, [user?.uid, profile, authLoading, can, filters?.rol, filters?.activo]);
 
   return { users, loading: authLoading || loading, error };
+}
+
+export function useNotificaciones(uid: string | undefined): {
+  items: Notificacion[];
+  noLeidas: number;
+  loading: boolean;
+  error: Error | null;
+  marcarLeida: (notifId: string) => void;
+  marcarTodasLeidas: () => void;
+} {
+  const [items, setItems] = useState<Notificacion[]>([]);
+  const [loading, setLoading] = useState(Boolean(uid));
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    if (!uid) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+    const db = getFirebaseDb();
+    const q = query(
+      collection(db, NOTIFICACIONES_COLLECTION, uid, NOTIFICACIONES_ITEMS_SUBCOLLECTION),
+      orderBy("creadoAt", "desc"),
+      limit(30),
+    );
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const rows: Notificacion[] = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<Notificacion, "id">),
+        }));
+        setItems(rows);
+        setLoading(false);
+      },
+      (err) => {
+        setError(err);
+        setLoading(false);
+      },
+    );
+    return () => unsub();
+  }, [uid]);
+
+  const noLeidas = useMemo(() => items.filter((n) => !n.leida).length, [items]);
+
+  const marcarLeida = useCallback((notifId: string) => {
+    setItems((prev) => prev.map((n) => (n.id === notifId ? { ...n, leida: true } : n)));
+    void (async () => {
+      const token = await getClientIdToken();
+      if (!token) return;
+      await marcarNotificacionLeida(token, notifId);
+    })();
+  }, []);
+
+  const marcarTodasLeidas = useCallback(() => {
+    setItems((prev) => prev.map((n) => ({ ...n, leida: true })));
+    void (async () => {
+      const token = await getClientIdToken();
+      if (!token) return;
+      await marcarTodasNotificacionesLeidas(token);
+    })();
+  }, []);
+
+  return { items, noLeidas, loading, error, marcarLeida, marcarTodasLeidas };
 }
 

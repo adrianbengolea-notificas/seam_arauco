@@ -42,6 +42,9 @@ service cloud.firestore {
       if (r == 'super_admin') {
         return 'superadmin';
       }
+      if (r == 'cliente_arauco') {
+        return 'cliente_arauco';
+      }
       if (r == 'tecnico' || r == 'supervisor' || r == 'admin' || r == 'superadmin') {
         return r;
       }
@@ -58,6 +61,14 @@ service cloud.firestore {
     function roleTecnicoUp() {
       let r = callerRol();
       return r == 'tecnico' || r == 'supervisor' || r == 'admin' || isSuperadminRol(r);
+    }
+
+    function roleClienteArauco() {
+      return callerRol() == 'cliente_arauco';
+    }
+
+    function puedeLeerComoOperativo() {
+      return roleTecnicoUp() || roleClienteArauco();
     }
 
     function roleSupervisorUp() {
@@ -80,6 +91,9 @@ service cloud.firestore {
       if (isSuperadminRol(r)) {
         return true;
       }
+      if (r == 'cliente_arauco') {
+        return wo.centro == callerCentro();
+      }
       if (r == 'admin' || r == 'supervisor') {
         return wo.centro == callerCentro();
       }
@@ -87,6 +101,10 @@ service cloud.firestore {
     }
 
     function canMutateWorkOrder(woId) {
+      let r = callerRol();
+      if (r == 'cliente_arauco') {
+        return false;
+      }
       return canReadWorkOrder(woId);
     }
 
@@ -108,23 +126,23 @@ service cloud.firestore {
     }
 
     match /assets/{id} {
-      allow read: if roleTecnicoUp();
+      allow read: if puedeLeerComoOperativo();
       allow write: if roleAdminPlantaUp();
     }
 
     match /equipos/{id} {
-      allow read: if roleTecnicoUp();
+      allow read: if puedeLeerComoOperativo();
       allow write: if roleSupervisorUp();
     }
 
     match /avisos/{id} {
-      allow read: if roleTecnicoUp();
+      allow read: if puedeLeerComoOperativo();
       allow create, update: if roleTecnicoUp();
       allow delete: if roleAdminPlantaUp();
     }
 
     match /{path=**}/materiales_ot/{lineId} {
-      allow read: if roleTecnicoUp();
+      allow read: if roleTecnicoUp() || roleClienteArauco();
     }
 
     match /work_orders/{woId} {
@@ -137,13 +155,23 @@ service cloud.firestore {
       allow delete: if roleAdminPlantaUp();
 
       match /checklist/{itemId} {
-        allow read, write: if signedIn() && canMutateWorkOrder(woId);
+        allow read: if signedIn() && canReadWorkOrder(woId);
+        allow write: if signedIn() && canMutateWorkOrder(woId);
       }
       match /materiales_ot/{lineId} {
-        allow read, write: if signedIn() && canMutateWorkOrder(woId);
+        allow read: if signedIn() && canReadWorkOrder(woId);
+        allow write: if signedIn() && canMutateWorkOrder(woId);
       }
       match /evidencias/{evId} {
-        allow read, write: if signedIn() && canMutateWorkOrder(woId);
+        allow read: if signedIn() && canReadWorkOrder(woId);
+        allow write: if signedIn() && canMutateWorkOrder(woId);
+      }
+      match /comentarios/{comentarioId} {
+        allow read: if signedIn() && canReadWorkOrder(woId);
+        allow create: if signedIn()
+          && request.auth.token.rol in ['cliente_arauco', 'supervisor', 'admin', 'superadmin']
+          && request.resource.data.autorId == request.auth.uid;
+        allow update, delete: if false;
       }
       match /historial/{hId} {
         /* append por reglas cliente deshabilitado; lectura técnico asignado o supervisor+ */
@@ -151,12 +179,18 @@ service cloud.firestore {
         allow write: if false;
       }
       match /planilla_respuestas/{respId} {
-        allow read, write: if signedIn() && canMutateWorkOrder(woId);
+        allow read: if signedIn() && canReadWorkOrder(woId);
+        allow write: if signedIn() && canMutateWorkOrder(woId);
       }
     }
 
+    match /notificaciones/{uid}/items/{notifId} {
+      allow read, update: if signedIn() && request.auth.uid == uid;
+      allow create, delete: if false;
+    }
+
     match /materials/{id} {
-      allow read: if signedIn();
+      allow read: if signedIn() && !roleClienteArauco();
       allow write: if roleAdminPlantaUp();
     }
 
@@ -176,7 +210,7 @@ service cloud.firestore {
     }
 
     match /programa_semanal/{semanaId} {
-      allow read: if roleTecnicoUp();
+      allow read: if puedeLeerComoOperativo();
       allow write: if roleAdminPlantaUp();
     }
 
@@ -185,12 +219,12 @@ service cloud.firestore {
     }
 
     match /planilla_templates/{templateId} {
-      allow read: if roleTecnicoUp();
+      allow read: if puedeLeerComoOperativo();
       allow write: if roleAdminPlantaUp();
     }
 
     match /centros/{centroId} {
-      allow read: if roleTecnicoUp();
+      allow read: if puedeLeerComoOperativo();
       allow write: if isSuperadminRol(callerRol());
     }
   }

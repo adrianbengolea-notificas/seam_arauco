@@ -36,6 +36,8 @@ export type Aviso = {
   estado: EstadoAviso;
   work_order_id?: string;
   prioridad?: "BAJA" | "MEDIA" | "ALTA" | "CRITICA";
+  /** Bandera de urgencia en programa / grilla (p. ej. correctivo urgente). */
+  urgente?: boolean;
   fecha_programada?: Timestamp | null;
   /** Badge M/T/S/A desde planilla de preventivos (opcional). */
   frecuencia_plan_mtsa?: "M" | "T" | "S" | "A";

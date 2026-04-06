@@ -27,4 +27,9 @@ export const WORK_ORDER_SUB = {
   evidencias: "evidencias",
   historial: "historial",
   planilla_respuestas: "planilla_respuestas",
+  comentarios: "comentarios",
 } as const;
+
+export const COMENTARIOS_SUBCOLLECTION = "comentarios";
+export const NOTIFICACIONES_COLLECTION = "notificaciones";
+export const NOTIFICACIONES_ITEMS_SUBCOLLECTION = "items";

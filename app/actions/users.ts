@@ -20,8 +20,8 @@ import type { UserRole } from "@/modules/users/types";
 import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
 
-const assignableByAdminSchema = z.enum(["tecnico", "supervisor", "admin"]);
-const assignableBySuperSchema = z.enum(["tecnico", "supervisor", "admin", "superadmin"]);
+const assignableByAdminSchema = z.enum(["tecnico", "supervisor", "admin", "cliente_arauco"]);
+const assignableBySuperSchema = z.enum(["tecnico", "supervisor", "admin", "superadmin", "cliente_arauco"]);
 
 function wrap<T>(fn: () => Promise<T>): Promise<ActionResult<T>> {
   return fn()

@@ -2,6 +2,8 @@ import React from "react";
 import { NextRequest, NextResponse } from "next/server";
 import { renderToStream } from "@react-pdf/renderer";
 import { verifyIdTokenOrThrow } from "@/lib/auth/verify-id-token";
+import { tienePermiso, toPermisoRol } from "@/lib/permisos/index";
+import { getUserProfileByUid } from "@/modules/users/repository";
 import {
   getPlanillaTemplateAdmin,
   getSignedPlanillaRespuestaAdmin,
@@ -18,8 +20,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  let uid: string;
   try {
-    await verifyIdTokenOrThrow(token);
+    ({ uid } = await verifyIdTokenOrThrow(token));
   } catch {
     return new NextResponse("Unauthorized", { status: 401 });
   }
@@ -28,6 +31,25 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   const workOrder = await getWorkOrderById(id);
   if (!workOrder) {
     return new NextResponse("Not found", { status: 404 });
+  }
+
+  const profile = await getUserProfileByUid(uid);
+  if (!profile?.activo) {
+    return new NextResponse("Forbidden", { status: 403 });
+  }
+  const r = toPermisoRol(profile.rol);
+  const puedePdf = tienePermiso(r, "ot:descargar_pdf") || tienePermiso(r, "cliente:descargar_pdf");
+  if (!puedePdf) {
+    return new NextResponse("Forbidden", { status: 403 });
+  }
+  if (r === "cliente_arauco" && workOrder.centro !== profile.centro) {
+    return new NextResponse("Forbidden", { status: 403 });
+  }
+  if (r === "tecnico" && workOrder.tecnico_asignado_uid !== uid) {
+    return new NextResponse("Forbidden", { status: 403 });
+  }
+  if ((r === "supervisor" || r === "admin") && workOrder.centro !== profile.centro) {
+    return new NextResponse("Forbidden", { status: 403 });
   }
 
   const materiales = await listMaterialesOtAdmin(id);

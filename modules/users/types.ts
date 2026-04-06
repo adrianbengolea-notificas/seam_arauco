@@ -16,6 +16,10 @@ export type UserProfile = {
   planta_codigo?: string;
   especialidades?: Array<"AA" | "ELECTRICO" | "GG">;
   activo: boolean;
+  /** Suscripción push (formato JSON de PushSubscription). */
+  pushSubscription?: Record<string, unknown> | null;
+  /** `true` si el usuario activó push; false si eligió “más tarde”. */
+  pushHabilitado?: boolean;
   created_at: Timestamp;
   updated_at: Timestamp;
 };

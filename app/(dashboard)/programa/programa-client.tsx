@@ -199,6 +199,8 @@ export function ProgramaClient() {
   const vistaOperativo = searchParams.get("vista") === "operativo";
 
   const { user, profile, loading: authLoading } = useAuth();
+  const { puede, rol } = usePermisos();
+  const esCliente = rol === "cliente_arauco";
   const centro = profile?.centro ?? DEFAULT_CENTRO;
 
   const { semanas, loading: semanasLoading, error: semanasError } = useSemanasDisponibles(centro, user?.uid);
@@ -256,9 +258,12 @@ export function ProgramaClient() {
     [filtroDia],
   );
 
-  const { puede } = usePermisos();
   const puedeCrearOt = puede("programa:crear_ot");
   const esAdmin = puede("programa:editar");
+
+  useEffect(() => {
+    if (esCliente && vistaOperativo) setVistaPublicada();
+  }, [esCliente, vistaOperativo]);
 
   const cerrarDrawer = useCallback(() => setDrawer(null), []);
 
@@ -268,7 +273,7 @@ export function ProgramaClient() {
     return <p className="text-sm text-muted-foreground">Cargando sesión…</p>;
   }
 
-  if (vistaOperativo) {
+  if (vistaOperativo && !esCliente) {
     return (
       <div className="space-y-6">
         <header className="flex flex-col gap-3">
@@ -335,14 +340,16 @@ export function ProgramaClient() {
             </select>
           </label>
         </div>
-        <div className="inline-flex flex-wrap rounded-lg border border-border bg-muted/30 p-1">
-          <Button type="button" variant="secondary" size="sm" className="shadow-sm" onClick={setVistaPublicada}>
-            Grilla publicada
-          </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={setVistaOperativa}>
-            OT, texto e importar Excel
-          </Button>
-        </div>
+        {!esCliente ? (
+          <div className="inline-flex flex-wrap rounded-lg border border-border bg-muted/30 p-1">
+            <Button type="button" variant="secondary" size="sm" className="shadow-sm" onClick={setVistaPublicada}>
+              Grilla publicada
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={setVistaOperativa}>
+              OT, texto e importar Excel
+            </Button>
+          </div>
+        ) : null}
       </header>
 
       {semanasError ? (
@@ -352,17 +359,22 @@ export function ProgramaClient() {
           {(semanasError as { code?: string }).code === "permission-denied" ? (
             <p className="mt-2 text-foreground">
               Comprobá que en Firebase estén desplegadas las reglas del repo (colección{" "}
-              <span className="font-mono">programa_semanal</span>, lectura para usuarios
-              con sesión) y que exista tu perfil en la colección <span className="font-mono">users</span> con rol
-              válido. Mientras tanto podés usar la pestaña{" "}
-              <button
-                type="button"
-                className="font-medium text-primary underline underline-offset-2"
-                onClick={setVistaOperativa}
-              >
-                OT, texto e importar Excel
-              </button>{" "}
-              (plan en <span className="font-mono">weekly_schedule</span>).
+              <span className="font-mono">programa_semanal</span>, lectura para usuarios con sesión) y que exista tu
+              perfil en la colección <span className="font-mono">users</span> con rol válido.
+              {!esCliente ? (
+                <>
+                  {" "}
+                  Mientras tanto podés usar la pestaña{" "}
+                  <button
+                    type="button"
+                    className="font-medium text-primary underline underline-offset-2"
+                    onClick={setVistaOperativa}
+                  >
+                    OT, texto e importar Excel
+                  </button>{" "}
+                  (plan en <span className="font-mono">weekly_schedule</span>).
+                </>
+              ) : null}
             </p>
           ) : null}
         </div>
@@ -420,17 +432,19 @@ export function ProgramaClient() {
         <Card>
           <CardContent className="space-y-3 pt-6 text-sm text-muted-foreground">
             <p>No hay programas publicados en la grilla clásica (colección programa_semanal) para este centro.</p>
-            <p>
-              Para cargar el plan con Excel, texto manual u OT en calendario, abrí la pestaña{" "}
-              <button
-                type="button"
-                className="font-medium text-primary underline underline-offset-2"
-                onClick={setVistaOperativa}
-              >
-                OT, texto e importar Excel
-              </button>
-              .
-            </p>
+            {!esCliente ? (
+              <p>
+                Para cargar el plan con Excel, texto manual u OT en calendario, abrí la pestaña{" "}
+                <button
+                  type="button"
+                  className="font-medium text-primary underline underline-offset-2"
+                  onClick={setVistaOperativa}
+                >
+                  OT, texto e importar Excel
+                </button>
+                .
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}

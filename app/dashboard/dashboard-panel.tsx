@@ -1,13 +1,15 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { usePermisos } from "@/lib/permisos/usePermisos";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { KNOWN_CENTROS } from "@/lib/config/app-config";
 import { cumplimientoPreventivos, correctivosPorEquipo } from "@/services/kpi";
 import { useMaterialsCatalogLive } from "@/modules/materials/hooks";
 import { useTodaysWorkOrdersCached } from "@/modules/work-orders/hooks";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -81,6 +83,12 @@ function StatCard({
 }
 
 export function DashboardPanel() {
+  const { rol } = usePermisos();
+  const router = useRouter();
+  useEffect(() => {
+    if (rol === "cliente_arauco") router.replace("/cliente");
+  }, [rol, router]);
+
   /** `null` = todos los centros (vista general). */
   const [centroFiltro, setCentroFiltro] = useState<string | null>(null);
   const { rows, loading, error } = useTodaysWorkOrdersCached(centroFiltro);

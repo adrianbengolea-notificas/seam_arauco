@@ -1,13 +1,13 @@
 import { getAdminDb } from "@/firebase/firebaseAdmin";
 import { COLLECTIONS, WORK_ORDER_SUB } from "@/lib/firestore/collections";
-import type { PlanillaRespuesta, PlanillaTemplate } from "@/lib/firestore/types";
+import type { Comentario, PlanillaRespuesta, PlanillaTemplate } from "@/lib/firestore/types";
 import type {
   ChecklistItem,
   EvidenciaOT,
   WorkOrder,
   WorkOrderHistorialEvent,
 } from "@/modules/work-orders/types";
-import { FieldValue, type Timestamp } from "firebase-admin/firestore";
+import { FieldValue, type QueryDocumentSnapshot, type Timestamp } from "firebase-admin/firestore";
 
 export const WORK_ORDERS_COLLECTION = COLLECTIONS.work_orders;
 
@@ -40,6 +40,31 @@ export async function updateWorkOrderDoc(
     ...patch,
     updated_at: FieldValue.serverTimestamp(),
   });
+}
+
+export async function addComentarioAdmin(
+  workOrderId: string,
+  data: Omit<Comentario, "id" | "creadoAt">,
+): Promise<string> {
+  const ref = await woRef(workOrderId).collection(WORK_ORDER_SUB.comentarios).add({
+    ...data,
+    creadoAt: FieldValue.serverTimestamp(),
+  });
+  return ref.id;
+}
+
+export async function getComentarioAdmin(
+  workOrderId: string,
+  comentarioId: string,
+): Promise<Comentario | null> {
+  const snap = await woRef(workOrderId).collection(WORK_ORDER_SUB.comentarios).doc(comentarioId).get();
+  if (!snap.exists) return null;
+  return { id: snap.id, ...(snap.data() as Omit<Comentario, "id">) };
+}
+
+export async function listComentarioDocsAdmin(workOrderId: string): Promise<QueryDocumentSnapshot[]> {
+  const snap = await woRef(workOrderId).collection(WORK_ORDER_SUB.comentarios).get();
+  return snap.docs;
 }
 
 export async function appendHistorialAdmin(

@@ -58,13 +58,14 @@ const SUPERVISOR_EXTRA: Permiso[] = [
   "historial:ver_todos",
   "historial:exportar_csv",
   "historial:informe_ia",
+  /** Alineado con Firestore `assets`: supervisores pueden crear/editar. */
+  "activos:crear_editar",
 ];
 
 const ADMIN_EXTRA: Permiso[] = [
   "programa:editar",
   "materiales:editar_catalogo",
   "materiales:revisar_ia",
-  "activos:crear_editar",
   "admin:gestionar_usuarios",
   "admin:cargar_programa",
 ];

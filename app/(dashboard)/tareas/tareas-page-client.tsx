@@ -223,7 +223,7 @@ export function TareasPageClient() {
   const centrosPerfil = useMemo(() => centrosEfectivosDelUsuario(profile), [profile]);
   const centro = (centrosPerfil[0] ?? DEFAULT_CENTRO).trim();
   const esCliente = toPermisoRol(profile?.rol) === "cliente_arauco";
-  const alcanceOtGlobal = esCliente || puede("ot:ver_todas");
+  const alcanceOtGlobal = puede("ot:ver_todas");
   const esTecnicoMulti = toPermisoRol(profile?.rol) === "tecnico" && centrosPerfil.length > 1;
   const puedeFiltrarCentroPlanta = alcanceOtGlobal || esTecnicoMulti;
 
@@ -260,6 +260,11 @@ export function TareasPageClient() {
   const [soloOrdenPreviaSap, setSoloOrdenPreviaSap] = useState(false);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (esCliente) router.replace("/cliente");
+  }, [authLoading, esCliente, router]);
+
+  useEffect(() => {
     const st = searchParams.get("estado");
     if (st === "PENDIENTE" || st === "EN_CURSO" || st === "COMPLETADA" || st === "CANCELADA") {
       setStatusFilter(st);
@@ -281,6 +286,7 @@ export function TareasPageClient() {
   // generar "permission-denied" en las reglas de Firestore.
   const centroParaQuery = useMemo(() => {
     if (authLoading || !profile) return undefined;
+    if (esCliente) return undefined;
     if (alcanceOtGlobal) {
       return centroParamFiltro;
     }
@@ -291,7 +297,7 @@ export function TareasPageClient() {
       return centrosPerfil;
     }
     return (centrosPerfil[0] ?? DEFAULT_CENTRO).trim();
-  }, [authLoading, profile, alcanceOtGlobal, esTecnicoMulti, centroParamFiltro, centrosPerfil]);
+  }, [authLoading, profile, esCliente, alcanceOtGlobal, esTecnicoMulti, centroParamFiltro, centrosPerfil]);
 
   const { ots, loading, error } = useWorkOrdersByEspecialidad(centroParaQuery, tab, statusFilter, {
     uid: user?.uid ?? "",
@@ -329,6 +335,10 @@ export function TareasPageClient() {
     const q = p.toString();
     return q ? `/tareas?${q}` : "/tareas";
   }, [searchParams]);
+
+  if (!authLoading && esCliente) {
+    return <p className="p-4 text-sm text-muted-foreground">Redirigiendo al panel…</p>;
+  }
 
   return (
     <div className="space-y-4 pb-24">

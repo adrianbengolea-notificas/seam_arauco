@@ -2,9 +2,24 @@
 
 import { AssetQrScanner } from "@/components/assets/AssetQrScanner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { usePermisos } from "@/lib/permisos/usePermisos";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
 export default function EscanerActivosPage() {
+  const { rol, authLoading } = usePermisos();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (rol === "cliente_arauco") router.replace("/activos");
+  }, [authLoading, rol, router]);
+
+  if (!authLoading && rol === "cliente_arauco") {
+    return <p className="p-6 text-sm text-muted-foreground">Redirigiendo a activos…</p>;
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">

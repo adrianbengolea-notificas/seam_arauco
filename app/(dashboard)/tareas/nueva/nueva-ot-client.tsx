@@ -24,6 +24,7 @@ import {
   where,
 } from "firebase/firestore";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /** Badge M/T/S/A para el formulario: solo si el aviso lo trae o la frecuencia lo permite (evita “M” por defecto en UNICA, etc.). */
@@ -70,6 +71,8 @@ const ASSET_OTRO_FUERA_CATALOGO = "__otro_fuera_catalogo__";
 
 export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: string }) {
   const { profile } = useAuth();
+  const router = useRouter();
+  const esClienteArauco = toPermisoRol(profile?.rol) === "cliente_arauco";
   const esSuperadmin = toPermisoRol(profile?.rol) === "superadmin";
   const profileCentro = (profile?.centro ?? DEFAULT_CENTRO).trim() || DEFAULT_CENTRO;
   // Superadmin puede elegir el centro; el resto usa siempre su centro asignado
@@ -322,6 +325,14 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
     } finally {
       setBusy(false);
     }
+  }
+
+  useEffect(() => {
+    if (esClienteArauco) router.replace("/cliente");
+  }, [esClienteArauco, router]);
+
+  if (esClienteArauco) {
+    return <p className="mx-auto max-w-lg px-1 py-8 text-sm text-muted-foreground">Redirigiendo al panel…</p>;
   }
 
   return (

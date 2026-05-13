@@ -62,7 +62,11 @@ export function AppSidebar({ mobileOpen, onNavigate }: AppSidebarProps) {
       return true;
     });
     if (rol === "cliente_arauco") {
-      list = list.map((l) => (l.href === "/dashboard" ? { ...l, href: "/cliente", label: "Inicio" } : l));
+      list = list
+        .map((l) => (l.href === "/dashboard" ? { ...l, href: "/cliente", label: "🏠 Panel" } : l))
+        .filter((l) =>
+          ["/cliente", "/programa", "/materiales", "/activos"].includes(l.href),
+        );
     }
     if (rol === "tecnico") {
       list = list.filter((l) => l.module !== "materiales");

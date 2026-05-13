@@ -101,22 +101,16 @@ const SUPERADMIN_EXTRA: Permiso[] = [
 
 const CLIENTE_ARAUCO: Permiso[] = [
   "cliente:ver_dashboard",
-  "cliente:ver_ots",
   "cliente:ver_programa",
   "cliente:ver_activos",
-  "cliente:descargar_pdf",
-  /** Solo lectura: programa semanal, calendario anual, preventivos S/A y reporte de cumplimiento. */
+  /** Solo lectura: programa semanal publicado (`/programa`). */
   "programa:ver",
-  "programa:ver_calendario_anual",
   "reportes:ver_cumplimiento",
-  "programa:ver_vencimientos_sa",
-  /** Solo lectura: catálogo y consumos en órdenes (misma pantalla `/materiales` que el resto). */
+  /** Solo lectura: catálogo y reporting (`/materiales`). */
   "materiales:ver_catalogo",
   "materiales:ver_reporting",
-  /** Ver fichas y escanear QR hacia `/activos/…` (sin editar maestro). */
+  /** Ver fichas (`/activos`); sin escáner ni edición de maestro. */
   "activos:ver",
-  "activos:escanear_qr",
-  "comentarios:crear",
   "comentarios:ver",
   NOTIF_RECIBIR,
 ];

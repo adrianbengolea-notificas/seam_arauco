@@ -277,6 +277,11 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
     [historialVisible],
   );
   const historialActorNames = useHistorialActorDisplayNames(historialActorUids);
+
+  useEffect(() => {
+    if (esCliente) router.replace("/cliente");
+  }, [esCliente, router]);
+
   async function token(): Promise<string> {
     const t = await getClientIdToken();
     if (!t) throw new Error("Sin sesión");
@@ -494,6 +499,10 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Error al descargar PDF");
     }
+  }
+
+  if (esCliente) {
+    return <p className="p-6 text-sm text-muted-foreground">Redirigiendo al panel…</p>;
   }
 
   if (loading) return <p className="text-sm text-zinc-600">Cargando OT…</p>;

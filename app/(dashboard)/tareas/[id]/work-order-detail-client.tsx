@@ -137,9 +137,12 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
   const planillaTemplateIdEsperado = useMemo(
     () =>
       workOrder
-        ? selectTemplate(workOrder, { especialidadActivo: assetLive?.especialidad_predeterminada })
+        ? selectTemplate(workOrder, {
+            especialidadAviso: avisoLive?.especialidad,
+            especialidadActivo: assetLive?.especialidad_predeterminada,
+          })
         : "",
-    [workOrder, assetLive?.especialidad_predeterminada],
+    [workOrder, avisoLive?.especialidad, assetLive?.especialidad_predeterminada],
   );
   const { template: planillaTemplate } = usePlanillaTemplate(
     planillaResp?.templateId || planillaTemplateIdEsperado || undefined,

@@ -6,24 +6,37 @@ const ESPECIALIDAD_VALIDAS = new Set<string>(["AA", "ELECTRICO", "GG", "HG"]);
 
 export type SelectTemplateOptions = {
   /**
-   * Especialidad del activo en catálogo (`especialidad_predeterminada`). Solo tiene prioridad
-   * cuando la OT tiene especialidad genérica (`GG` o vacía); nunca pisa `ELECTRICO`/`AA`/`HG`.
+   * Especialidad del aviso en `avisos/{id}.especialidad`. Si está definida y es válida, manda
+   * para elegir plantilla (p. ej. AA vs GG) aunque la OT o el activo difieran.
+   */
+  especialidadAviso?: Especialidad | null;
+  /**
+   * Especialidad del activo en catálogo (`especialidad_predeterminada`). Solo se usa si no hay
+   * `especialidadAviso` válida; y solo corrige cuando la OT tiene especialidad genérica (`GG` o vacía).
    */
   especialidadActivo?: Especialidad | null;
 };
 
 /**
- * Elige el id de documento en `planilla_templates/{id}` según especialidad y subtipo de la OT.
+ * Elige el id de documento en `planilla_templates/{id}` según especialidad (prioriza aviso si se
+ * informa) y subtipo de la OT.
  */
 export function selectTemplate(ot: WorkOrder, opts?: SelectTemplateOptions): string {
-  const espPred = opts?.especialidadActivo?.trim();
-  // Asset catalog overrides OT only when the OT has the generic "GG" specialty
-  // (SAP often defaults to GG). If the OT already says ELECTRICO/AA/HG, trust it.
-  const otEspIsGeneric = !ot.especialidad || ot.especialidad === "GG";
-  const esp: Especialidad =
-    espPred && ESPECIALIDAD_VALIDAS.has(espPred) && otEspIsGeneric
-      ? (espPred as Especialidad)
-      : ot.especialidad;
+  const avisoEsp = opts?.especialidadAviso?.trim();
+  const espFromAviso =
+    avisoEsp && ESPECIALIDAD_VALIDAS.has(avisoEsp) ? (avisoEsp as Especialidad) : null;
+
+  let esp: Especialidad;
+  if (espFromAviso) {
+    esp = espFromAviso;
+  } else {
+    const espPred = opts?.especialidadActivo?.trim();
+    const otEspIsGeneric = !ot.especialidad || ot.especialidad === "GG";
+    esp =
+      espPred && ESPECIALIDAD_VALIDAS.has(espPred) && otEspIsGeneric
+        ? (espPred as Especialidad)
+        : ot.especialidad;
+  }
 
   if (esp === "GG") return "GG";
 

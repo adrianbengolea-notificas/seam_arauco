@@ -1,6 +1,7 @@
 import { AppError } from "@/lib/errors/app-error";
 import type { ItemRespuesta, PlanillaRespuesta } from "@/lib/firestore/types";
 import { getAssetById } from "@/modules/assets/repository";
+import { getAvisoById } from "@/modules/notices/repository";
 import { uploadFirmaDigitalFromDataUrl } from "@/modules/work-orders/firma-storage-admin";
 import { planillaItemsOkSinFirmas, validatePlanillaFirmable } from "@/lib/planillas/form-utils";
 import { selectTemplate } from "@/lib/planillas/select-template";
@@ -96,8 +97,14 @@ export async function iniciarPlanillaService(input: {
     return { respuestaId: abierta.id, existing: true, templateId: abierta.templateId };
   }
 
-  const asset = await getAssetById(wo.asset_id);
-  const templateId = selectTemplate(wo, { especialidadActivo: asset?.especialidad_predeterminada });
+  const [asset, aviso] = await Promise.all([
+    getAssetById(wo.asset_id),
+    wo.aviso_id?.trim() ? getAvisoById(wo.aviso_id.trim()) : Promise.resolve(null),
+  ]);
+  const templateId = selectTemplate(wo, {
+    especialidadAviso: aviso?.especialidad,
+    especialidadActivo: asset?.especialidad_predeterminada,
+  });
   const template = await getPlanillaTemplateAdmin(templateId);
   if (!template) throw new AppError("NOT_FOUND", `Template de planilla no disponible: ${templateId}`);
 

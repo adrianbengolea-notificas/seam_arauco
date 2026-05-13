@@ -12,7 +12,14 @@ import { woConstraintExcluirArchivadas } from "@/lib/firestore/work-order-query"
 import { propuestaSemanaDocId, stablePropuestaItemId } from "@/lib/scheduling/propuesta-id";
 import type { PropuestaSemanaFirestore } from "@/lib/firestore/plan-mantenimiento-types";
 import type { Aviso } from "@/modules/notices/types";
-import type { ProgramaSemana, SlotSemanal, WeeklyPlanRow, WeeklyScheduleSlot } from "@/modules/scheduling/types";
+import type {
+  DiaSemanaPrograma,
+  EspecialidadPrograma,
+  ProgramaSemana,
+  SlotSemanal,
+  WeeklyPlanRow,
+  WeeklyScheduleSlot,
+} from "@/modules/scheduling/types";
 import {
   collection,
   doc,
@@ -26,7 +33,13 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
-import { getIsoWeekId, parseIsoWeekToBounds, semanaLabelDesdeIso, shiftIsoWeekId } from "@/modules/scheduling/iso-week";
+import {
+  getIsoWeekId,
+  parseIsoWeekIdFromSemanaParam,
+  parseIsoWeekToBounds,
+  semanaLabelDesdeIso,
+  shiftIsoWeekId,
+} from "@/modules/scheduling/iso-week";
 
 /**
  * @param authUid — Firebase Auth UID; la suscripción solo arranca cuando hay sesión.
@@ -1147,6 +1160,148 @@ export function useAvisosVencimientos(input: {
   }, [enabled, input.authUid, input.centro, input.verTodosLosCentros, input.frecuenciasPlanMtsa]);
 
   return { avisos, loading, error };
+}
+
+/** Dónde figura el aviso en `programa_semanal` (día y clave de celda para mover). */
+export type UbicacionAvisoEnProgramaPublicado = {
+  programaDocId: string;
+  isoSemana: string;
+  dia: DiaSemanaPrograma;
+  localidad: string;
+  especialidad: EspecialidadPrograma;
+};
+
+function findUbicacionAvisoEnPrograma(
+  programa: ProgramaSemana,
+  aviso: Pick<Aviso, "id" | "n_aviso">,
+): UbicacionAvisoEnProgramaPublicado | null {
+  const avisoNumero = String(aviso.n_aviso ?? "").trim();
+  const want = aviso.id?.trim();
+  if (!avisoNumero) return null;
+  for (const slot of programa.slots ?? []) {
+    for (const a of slot.avisos ?? []) {
+      if (String(a.numero ?? "").trim() !== avisoNumero) continue;
+      const fid = a.avisoFirestoreId?.trim();
+      if (want && fid && fid !== want) continue;
+      if (want && !fid) continue;
+      const iso = parseIsoWeekIdFromSemanaParam(programa.id);
+      if (!iso || !/^\d{4}-W\d{2}$/.test(iso)) continue;
+      return {
+        programaDocId: programa.id,
+        isoSemana: iso,
+        dia: slot.dia,
+        localidad: slot.localidad,
+        especialidad: slot.especialidad,
+      };
+    }
+  }
+  return null;
+}
+
+function programaSemanalDocIdsDesdeAvisos(
+  avisos: readonly Pick<Aviso, "centro" | "incluido_en_semana">[],
+): string[] {
+  const s = new Set<string>();
+  for (const a of avisos) {
+    const iso = String(a.incluido_en_semana ?? "").trim();
+    if (!/^\d{4}-W\d{2}$/.test(iso)) continue;
+    const c = a.centro?.trim();
+    if (!c) continue;
+    s.add(propuestaSemanaDocId(c, iso));
+  }
+  return [...s].sort();
+}
+
+/**
+ * Suscripción a `programa_semanal` por cada combinación centro + `incluido_en_semana`,
+ * para resolver día y datos de la celda (mover aviso sin abrir la grilla).
+ */
+export function useUbicacionAvisosProgramaPublicado(
+  avisos: readonly Pick<Aviso, "id" | "n_aviso" | "centro" | "incluido_en_semana">[],
+  authUid: string | undefined,
+): {
+  porAvisoId: Partial<Record<string, UbicacionAvisoEnProgramaPublicado>>;
+  loading: boolean;
+  error: Error | null;
+} {
+  const docIds = useMemo(() => programaSemanalDocIdsDesdeAvisos(avisos), [avisos]);
+  const docIdsKey = docIds.join("|");
+  const [programaPorDoc, setProgramaPorDoc] = useState<Partial<Record<string, ProgramaSemana | null>>>({});
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    if (!authUid || docIds.length === 0) {
+      setProgramaPorDoc({});
+      setError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const unsubs: Unsubscribe[] = [];
+    setProgramaPorDoc({});
+    setError(null);
+
+    void (async () => {
+      const auth = getFirebaseAuth();
+      await auth.authStateReady();
+      if (cancelled || !auth.currentUser) {
+        if (!cancelled) setProgramaPorDoc({});
+        return;
+      }
+
+      const db = getFirebaseDb();
+      for (const docId of docIds) {
+        const ref = doc(db, COLLECTIONS.programa_semanal, docId);
+        unsubs.push(
+          onSnapshot(
+            ref,
+            (snap) => {
+              if (cancelled) return;
+              const next = snap.exists()
+                ? ({
+                    id: snap.id,
+                    ...(snap.data() as Omit<ProgramaSemana, "id">),
+                    slots: ((snap.data() as { slots?: SlotSemanal[] }).slots ?? []) as SlotSemanal[],
+                  } as ProgramaSemana)
+                : null;
+              setProgramaPorDoc((prev) => ({ ...prev, [docId]: next }));
+            },
+            (err) => {
+              if (cancelled) return;
+              setError(err);
+            },
+          ),
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      unsubs.forEach((u) => u());
+    };
+  }, [authUid, docIdsKey]);
+
+  const loading = Boolean(
+    authUid && docIds.length > 0 && docIds.some((id) => programaPorDoc[id] === undefined),
+  );
+
+  const porAvisoId = useMemo(() => {
+    const out: Partial<Record<string, UbicacionAvisoEnProgramaPublicado>> = {};
+    for (const a of avisos) {
+      const iso = String(a.incluido_en_semana ?? "").trim();
+      if (!/^\d{4}-W\d{2}$/.test(iso)) continue;
+      const c = a.centro?.trim();
+      if (!c) continue;
+      const docId = propuestaSemanaDocId(c, iso);
+      const prog = programaPorDoc[docId];
+      if (prog === undefined || prog === null) continue;
+      const ub = findUbicacionAvisoEnPrograma(prog, a);
+      if (ub) out[a.id] = ub;
+    }
+    return out;
+  }, [avisos, programaPorDoc]);
+
+  return { porAvisoId, loading, error };
 }
 
 /** Avisos mensuales/trimestrales (p. ej. selector al armar plan). */

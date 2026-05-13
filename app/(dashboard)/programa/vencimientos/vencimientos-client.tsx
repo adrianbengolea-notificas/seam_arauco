@@ -1,19 +1,21 @@
 "use client";
 
-import { actionAddAvisoToProgramaPublicado } from "@/app/actions/schedule";
+import { actionAddAvisoToProgramaPublicado, actionMoveAvisoEnProgramaPublicado } from "@/app/actions/schedule";
 import { CENTRO_NOMBRES, DEFAULT_CENTRO, KNOWN_CENTROS, nombreCentro } from "@/lib/config/app-config";
 import { mensajeErrorFirebaseParaUsuario } from "@/lib/firebase/mensaje-error-usuario";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { HelpIconTooltip } from "@/components/ui/help-icon-tooltip";
+import { Input } from "@/components/ui/input";
 import { PermisoGuard } from "@/components/auth/PermisoGuard";
 import { usePermisos } from "@/lib/permisos/usePermisos";
 import { cn } from "@/lib/utils";
-import type { AvisoConVencimiento } from "@/modules/scheduling/hooks";
+import type { AvisoConVencimiento, UbicacionAvisoEnProgramaPublicado } from "@/modules/scheduling/hooks";
 import {
   FRECUENCIAS_PLAN_MTSA_VENCIMIENTOS_TODAS,
   useAvisosVencimientos,
+  useUbicacionAvisosProgramaPublicado,
 } from "@/modules/scheduling/hooks";
 import {
   getIsoWeekId,
@@ -25,7 +27,8 @@ import type { DiaSemanaPrograma } from "@/modules/scheduling/types";
 import { getClientIdToken, useAuthUser, useUserProfile } from "@/modules/users/hooks";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { ArrowRight, ClipboardList } from "lucide-react";
+import { propuestaSemanaDocId } from "@/lib/scheduling/propuesta-id";
+import { ArrowRight, ClipboardList, Search } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -127,6 +130,7 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
   const { profile } = useUserProfile(user?.uid);
   const { puede, rol } = usePermisos();
   const puedeVerVencimientosSa = puede("programa:ver_vencimientos_sa");
+  const puedeMoverEnProgramaPublicado = puede("programa:crear_ot") || puede("programa:editar");
   const sp = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -164,6 +168,7 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
   const [freq, setFreq] = useState<"todos" | "M" | "T" | "S" | "A">("todos");
   const [semanaProgF, setSemanaProgF] = useState<"todos" | "con_semana" | "sin_semana">("todos");
   const [centroF, setCentroF] = useState<string>("");
+  const [busqueda, setBusqueda] = useState("");
 
   const { avisos, loading, error } = useAvisosVencimientos({
     authUid: user?.uid,
@@ -172,6 +177,9 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
     enabled: puedeVerVencimientosSa,
     frecuenciasPlanMtsa: FRECUENCIAS_PLAN_MTSA_VENCIMIENTOS_TODAS,
   });
+
+  const { porAvisoId: ubicacionGrillaPorAviso, loading: loadingUbicaciones, error: errorUbicaciones } =
+    useUbicacionAvisosProgramaPublicado(avisos, user?.uid);
 
   const kpis = useMemo(() => {
     let sinHistorial = 0;
@@ -264,8 +272,17 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
       else if (estadoF === "proximo") rows = rows.filter((a) => a.estado_vencimiento_live === "proximo");
       else if (estadoF === "ok") rows = rows.filter((a) => a.estado_vencimiento_live === "ok");
     }
+    const q = busqueda.trim().toLowerCase();
+    if (q) {
+      rows = rows.filter((a) => {
+        if (String(a.n_aviso ?? "").toLowerCase().includes(q)) return true;
+        if ((a.texto_corto ?? "").toLowerCase().includes(q)) return true;
+        if ((a.ubicacion_tecnica ?? "").toLowerCase().includes(q)) return true;
+        return false;
+      });
+    }
     return rows;
-  }, [avisos, centroF, esp, estadoF, freq, semanaProgF, tab, superadmin]);
+  }, [avisos, busqueda, centroF, esp, estadoF, freq, semanaProgF, tab, superadmin]);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [pick, setPick] = useState<AvisoConVencimiento | null>(null);
@@ -273,6 +290,10 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
   const [diaPick, setDiaPick] = useState<DiaSemanaPrograma>("lunes");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [replanDraft, setReplanDraft] = useState<
+    Partial<Record<string, { weekId?: string; dia?: DiaSemanaPrograma }>>
+  >({});
+  const [movingAvisoId, setMovingAvisoId] = useState<string | null>(null);
 
   /** Semanas ISO elegibles al abrir el modal (pasado cercano + planificación). */
   const opcionesSemanaIso = useMemo(() => {
@@ -285,7 +306,7 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
       out.push({ id, label: `${id} · ${rango}` });
     }
     return out;
-  }, [dialogOpen]);
+  }, []);
 
   const openAgregar = (a: AvisoConVencimiento) => {
     setPick(a);
@@ -317,6 +338,51 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
       setBusy(false);
     }
   }, [pick, weekId, diaPick]);
+
+  const aplicarReplan = useCallback(
+    async (a: AvisoConVencimiento, ubic: UbicacionAvisoEnProgramaPublicado) => {
+      const d = replanDraft[a.id];
+      const destWeek = (d?.weekId ?? ubic.isoSemana).trim();
+      const destDia = d?.dia ?? ubic.dia;
+      const c = a.centro?.trim();
+      if (!c) {
+        setMsg("El aviso no tiene centro.");
+        return;
+      }
+      const destDoc = propuestaSemanaDocId(c, destWeek);
+      if (destDoc === ubic.programaDocId && destDia === ubic.dia) return;
+      setMovingAvisoId(a.id);
+      setMsg(null);
+      try {
+        const tok = await getClientIdToken();
+        if (!tok) throw new Error("Sin sesión");
+        const res = await actionMoveAvisoEnProgramaPublicado(tok, {
+          sourceProgramaDocId: ubic.programaDocId,
+          destProgramaDocId: destDoc,
+          avisoNumero: a.n_aviso,
+          avisoFirestoreId: a.id,
+          from: {
+            localidad: ubic.localidad,
+            dia: ubic.dia,
+            especialidad: ubic.especialidad,
+          },
+          destDia,
+        });
+        if (!res.ok) throw new Error(res.error.message);
+        setMsg("Semana o día del programa actualizado.");
+        setReplanDraft((p) => {
+          const n = { ...p };
+          delete n[a.id];
+          return n;
+        });
+      } catch (e) {
+        setMsg(e instanceof Error ? e.message : "Error");
+      } finally {
+        setMovingAvisoId(null);
+      }
+    },
+    [replanDraft],
+  );
 
   if (!puedeVerVencimientosSa) {
     return <p className="text-sm text-muted-foreground">No tenés permiso para ver esta página.</p>;
@@ -642,16 +708,40 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
         )}
       </div>
 
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        <label className="flex min-w-[12rem] max-w-md flex-1 flex-col gap-1 text-xs font-medium">
+          Búsqueda rápida
+          <span className="relative block">
+            <Search
+              className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              className="h-9 pl-7 text-sm"
+              placeholder="N.º de aviso o palabras (descripción, ubicación)…"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              aria-label="Filtrar avisos por número o texto"
+            />
+          </span>
+        </label>
+      </div>
+
       {loading ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
       {error ? (
         <p className="text-sm text-destructive" role="alert">
           {mensajeErrorFirebaseParaUsuario(error)}
         </p>
       ) : null}
+      {errorUbicaciones ? (
+        <p className="text-sm text-destructive" role="alert">
+          {mensajeErrorFirebaseParaUsuario(errorUbicaciones)}
+        </p>
+      ) : null}
       {msg ? <p className="text-sm text-emerald-700 dark:text-emerald-400">{msg}</p> : null}
 
       <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full min-w-[800px] text-left text-sm">
+        <table className="w-full min-w-[1040px] text-left text-sm">
           <thead className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">Aviso</th>
@@ -660,6 +750,7 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
               <th className="px-3 py-2 font-medium">Ubicación</th>
               <th className="px-3 py-2 font-medium">Última ejec.</th>
               <th className="px-3 py-2 font-medium">Próx. venc.</th>
+              <th className="min-w-[14rem] px-3 py-2 font-medium">Programa (sem. / día)</th>
               <th className="px-3 py-2 font-medium">Estado</th>
               <th className="px-3 py-2 font-medium">Acción</th>
             </tr>
@@ -675,6 +766,18 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
                       ponerCentroEnQuery: superadmin,
                     })
                   : null;
+              const ubic = ubicacionGrillaPorAviso[a.id];
+              const draft = replanDraft[a.id];
+              const selWeek = draft?.weekId ?? ubic?.isoSemana ?? isoProg ?? "";
+              const selDia = draft?.dia ?? ubic?.dia ?? ("lunes" as DiaSemanaPrograma);
+              const opcionesSemanaFila =
+                selWeek && !opcionesSemanaIso.some((o) => o.id === selWeek)
+                  ? [{ id: selWeek, label: selWeek }, ...opcionesSemanaIso]
+                  : opcionesSemanaIso;
+              const hayCambioReplan =
+                ubic &&
+                (propuestaSemanaDocId(a.centro?.trim() ?? "", selWeek) !== ubic.programaDocId ||
+                  selDia !== ubic.dia);
               return (
               <tr key={a.id} className="hover:bg-muted/30">
                 <td className="px-3 py-2 font-mono text-xs">{a.n_aviso}</td>
@@ -685,15 +788,145 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
                 </td>
                 <td className="max-w-[240px] px-3 py-2 text-muted-foreground">{a.texto_corto}</td>
                 <td className="px-3 py-2 text-xs">{a.ubicacion_tecnica}</td>
-                <td className="px-3 py-2 text-xs">
-                  {a.ultima_ejecucion_fecha
-                    ? format(a.ultima_ejecucion_fecha.toDate(), "dd/MM/yyyy", { locale: es })
-                    : "—"}
+                <td className="align-top px-3 py-2 text-xs">
+                  {a.ultima_ejecucion_fecha ? (
+                    format(a.ultima_ejecucion_fecha.toDate(), "dd/MM/yyyy", { locale: es })
+                  ) : (
+                    <div className="space-y-0.5">
+                      <span>—</span>
+                      {(isoProg || ubic) && (
+                        <span className="block text-[10px] leading-tight text-muted-foreground">
+                          {ubic
+                            ? `Programa: ${DIAS_PROG.find((d) => d.value === ubic.dia)?.label ?? ubic.dia}`
+                            : isoProg
+                              ? `En programa: ${semanaLabelDesdeIso(isoProg)}`
+                              : null}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </td>
-                <td className="px-3 py-2 text-xs">
-                  {a.proximo_vencimiento
-                    ? format(a.proximo_vencimiento.toDate(), "dd/MM/yyyy", { locale: es })
-                    : "—"}
+                <td className="align-top px-3 py-2 text-xs">
+                  {a.proximo_vencimiento ? (
+                    format(a.proximo_vencimiento.toDate(), "dd/MM/yyyy", { locale: es })
+                  ) : (
+                    <div className="space-y-0.5">
+                      <span>—</span>
+                      {a.ultima_ejecucion_fecha && (isoProg || ubic) ? (
+                        <span className="block text-[10px] leading-tight text-muted-foreground">
+                          {ubic
+                            ? `Programa: ${DIAS_PROG.find((d) => d.value === ubic.dia)?.label ?? ubic.dia}`
+                            : isoProg
+                              ? `En programa: ${semanaLabelDesdeIso(isoProg)}`
+                              : null}
+                        </span>
+                      ) : null}
+                    </div>
+                  )}
+                </td>
+                <td className="align-top px-3 py-2 text-xs">
+                  <div className="flex max-w-[280px] flex-col gap-1.5">
+                    {isoProg ? (
+                      <>
+                        {loadingUbicaciones && !ubic ? (
+                          <span className="text-[11px] text-muted-foreground">Cargando celda…</span>
+                        ) : null}
+                        {!loadingUbicaciones && !ubic ? (
+                          <p className="text-[11px] leading-snug text-muted-foreground">
+                            {semanaLabelDesdeIso(isoProg)} — no aparece en la grilla publicada.
+                            {hrefPro ? (
+                              <>
+                                {" "}
+                                <Link
+                                  href={hrefPro}
+                                  className="font-medium text-primary underline-offset-2 hover:underline"
+                                >
+                                  Abrir grilla
+                                </Link>
+                              </>
+                            ) : null}
+                          </p>
+                        ) : null}
+                        {ubic ? (
+                          <>
+                            <p className="text-[11px] leading-snug">
+                              <span className="font-medium text-foreground">
+                                {semanaLabelDesdeIso(ubic.isoSemana)}
+                              </span>
+                              <span className="text-muted-foreground"> · </span>
+                              <span>{DIAS_PROG.find((d) => d.value === ubic.dia)?.label ?? ubic.dia}</span>
+                            </p>
+                            {hrefPro ? (
+                              <Link
+                                href={hrefPro}
+                                className="text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+                              >
+                                Ver en grilla
+                              </Link>
+                            ) : null}
+                            {puedeMoverEnProgramaPublicado ? (
+                              <div className="flex flex-col gap-1 border-t border-border/60 pt-1.5">
+                                <label className="text-[10px] font-medium text-muted-foreground">Cambio rápido</label>
+                                <select
+                                  className="h-8 rounded-md border border-input bg-background px-1.5 text-[11px]"
+                                  value={selWeek}
+                                  onChange={(e) =>
+                                    setReplanDraft((p) => ({
+                                      ...p,
+                                      [a.id]: { ...p[a.id], weekId: e.target.value },
+                                    }))
+                                  }
+                                >
+                                  {opcionesSemanaFila.map((o) => (
+                                    <option key={o.id} value={o.id}>
+                                      {o.label}
+                                    </option>
+                                  ))}
+                                </select>
+                                <select
+                                  className="h-8 rounded-md border border-input bg-background px-1.5 text-[11px]"
+                                  value={selDia}
+                                  onChange={(e) =>
+                                    setReplanDraft((p) => ({
+                                      ...p,
+                                      [a.id]: {
+                                        ...p[a.id],
+                                        dia: e.target.value as DiaSemanaPrograma,
+                                      },
+                                    }))
+                                  }
+                                >
+                                  {DIAS_PROG.map((d) => (
+                                    <option key={d.value} value={d.value}>
+                                      {d.label}
+                                    </option>
+                                  ))}
+                                </select>
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  className="h-8 text-[11px]"
+                                  disabled={
+                                    !hayCambioReplan || movingAvisoId === a.id || !a.centro?.trim()
+                                  }
+                                  onClick={() => void aplicarReplan(a, ubic)}
+                                >
+                                  {movingAvisoId === a.id ? "Guardando…" : "Aplicar"}
+                                </Button>
+                              </div>
+                            ) : null}
+                          </>
+                        ) : null}
+                      </>
+                    ) : avisoTieneOrdenServicioVinculada(a) ? (
+                      <span className="text-[11px] text-muted-foreground">
+                        Sin semana en grilla (cubierto por OT).
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-3 py-2">{badgeEstado(a)}</td>
                 <td className="px-3 py-2">
@@ -701,9 +934,6 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
                     {puede("programa:crear_ot") && !avisoTieneOrdenServicioVinculada(a) ? (
                       isoProg && hrefPro ? (
                         <>
-                          <p className="text-xs text-muted-foreground">
-                            En programa semanal ({semanaLabelDesdeIso(isoProg)}).
-                          </p>
                           <Link
                             href={hrefPro}
                             className="text-xs font-medium text-primary underline-offset-2 hover:underline"

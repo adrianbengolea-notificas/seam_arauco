@@ -553,6 +553,8 @@ function ProgramaChipAvisoConArrastre({
   estadoServicio,
   cargandoEstadoServicio,
   ordenServicioIdEfectiva,
+  onDragPayloadStart,
+  onDragPayloadEnd,
 }: {
   programaDocId: string;
   loc: string;
@@ -564,6 +566,8 @@ function ProgramaChipAvisoConArrastre({
   estadoServicio: WorkOrderEstado | undefined;
   cargandoEstadoServicio: boolean;
   ordenServicioIdEfectiva: string | undefined;
+  onDragPayloadStart?: (payload: ProgramaAvisoDragPayload) => void;
+  onDragPayloadEnd?: () => void;
 }) {
   const dragPayload = puedeArrastrar
     ? ({
@@ -586,6 +590,10 @@ function ProgramaChipAvisoConArrastre({
           onDragStart={(e) => {
             e.dataTransfer.setData(MIME_PROGRAMA_AVISO_DRAG, JSON.stringify(dragPayload));
             e.dataTransfer.effectAllowed = "move";
+            onDragPayloadStart?.(dragPayload);
+          }}
+          onDragEnd={() => {
+            onDragPayloadEnd?.();
           }}
           aria-label={`Arrastrar aviso ${c.aviso.numero} a otro día (misma fila)`}
           title="Arrastrar a otro día (misma fila)"
@@ -1513,10 +1521,15 @@ export function ProgramaClient() {
 
   const [dndBusy, setDndBusy] = useState(false);
   const [dndFlashMsg, setDndFlashMsg] = useState<string | null>(null);
+  const [payloadArrastrePrograma, setPayloadArrastrePrograma] = useState<ProgramaAvisoDragPayload | null>(null);
+
+  useEffect(() => {
+    setPayloadArrastrePrograma(null);
+  }, [programaParaGrilla?.id]);
 
   const ejecutarDropAvisoEnCelda = useCallback(
     async (
-      e: DragEvent<HTMLTableCellElement>,
+      e: DragEvent<HTMLElement>,
       celdaLoc: string,
       celdaDia: DiaSemanaPrograma,
     ) => {
@@ -1574,9 +1587,10 @@ export function ProgramaClient() {
         window.setTimeout(() => setDndFlashMsg(null), 6000);
       } finally {
         setDndBusy(false);
+        setPayloadArrastrePrograma(null);
       }
     },
-    [programaParaGrilla?.id, programaParaGrilla, puedeMoverEnProgramaPublicado],
+    [programaParaGrilla, puedeMoverEnProgramaPublicado],
   );
 
   const tablaLoading = authLoading || semanasLoading || (Boolean(semanaId) && programaLoading);
@@ -2250,6 +2264,12 @@ export function ProgramaClient() {
                                       loadingEstadosServicio,
                                     )}
                                     puedeArrastrar={Boolean(puedeMoverEnProgramaPublicado && docIdChip)}
+                                    onDragPayloadStart={
+                                      puedeMoverEnProgramaPublicado ? setPayloadArrastrePrograma : undefined
+                                    }
+                                    onDragPayloadEnd={
+                                      puedeMoverEnProgramaPublicado ? () => setPayloadArrastrePrograma(null) : undefined
+                                    }
                                     onAbrirDrawer={() => {
                                       const slot = encuentraSlotParaChip(
                                         programaParaGrilla,
@@ -2281,93 +2301,128 @@ export function ProgramaClient() {
             ) : null}
           </div>
 
-          {/* Desktop: localidades en filas */}
+          {/* Desktop: una columna por día; cada columna apila solo las localidades con avisos (sin huecos por otras filas). */}
           <div className="hidden md:block overflow-x-auto rounded-xl border border-border">
-            <table
-              className="w-full min-w-[32rem] border-collapse text-sm"
+            <div
+              className="min-w-[32rem] text-sm"
+              style={{
+                display: "grid",
+                gridTemplateColumns: `repeat(${diasColumnas.length}, minmax(0, 1fr))`,
+              }}
               aria-label="Programa semanal: días de la semana por fila de planificación"
             >
-              <thead>
-                <tr className="border-b border-border bg-foreground/[0.03]">
-                  {diasColumnas.map((d) => (
-                    <th key={d} className="px-2 py-2 text-center font-semibold text-muted-foreground">
-                      {DIA_LABEL[d]}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {localidades.map((loc) => (
-                  <tr key={loc} className="border-b border-border last:border-0">
-                    {diasColumnas.map((d) => {
-                      const celdas = grid.get(loc)?.get(d) ?? [];
-                      return (
-                        <td
-                          key={`${loc}-${d}`}
-                          className={cn("align-top px-2 py-2", dndBusy && "pointer-events-none opacity-70")}
-                          onDragOver={
-                            puedeMoverEnProgramaPublicado
-                              ? (ev) => {
-                                  ev.preventDefault();
-                                  ev.dataTransfer.dropEffect = "move";
-                                }
-                              : undefined
-                          }
-                          onDrop={
-                            puedeMoverEnProgramaPublicado
-                              ? (ev) => void ejecutarDropAvisoEnCelda(ev, loc, d)
-                              : undefined
-                          }
-                        >
-                          <div className="flex min-h-[2rem] flex-wrap justify-center gap-1">
-                            {celdas.map((c, i) => {
-                              const docIdChip = c.programaDocId ?? programaParaGrilla.id;
-                              const ordenIdEfectiva = ordenServicioIdEfectivaEnPrograma(
-                                c.aviso,
-                                workOrderIdPorAvisoDocId,
-                              );
-                              return (
-                                <ProgramaChipAvisoConArrastre
-                                  key={`${c.aviso.numero}-${i}`}
-                                  programaDocId={docIdChip}
-                                  loc={loc}
-                                  diaCol={d}
-                                  c={c}
-                                  ordenServicioIdEfectiva={ordenIdEfectiva}
-                                  {...chipEstadoServicioProps(
-                                    ordenIdEfectiva,
-                                    estadosServicioPorId,
-                                    loadingEstadosServicio,
-                                  )}
-                                  puedeArrastrar={Boolean(puedeMoverEnProgramaPublicado && docIdChip)}
-                                  onAbrirDrawer={() => {
-                                    const slot = encuentraSlotParaChip(
-                                      programaParaGrilla,
-                                      loc,
-                                      d,
-                                      c.especialidad,
-                                      c.aviso.numero,
-                                    );
-                                    if (slot && docIdChip) {
-                                      setDrawer({
-                                        aviso: c.aviso,
-                                        slot,
-                                        programaDocId: docIdChip,
-                                      });
-                                    }
-                                  }}
-                                  chipClassNameBoton="inline-block max-w-[9rem] cursor-pointer rounded-md border px-1.5 py-1 text-left text-[11px] font-medium leading-snug sm:max-w-[11rem] sm:text-xs"
-                                />
-                              );
-                            })}
+              {diasColumnas.map((d) => (
+                <div
+                  key={`head-${d}`}
+                  className="border-b border-border bg-foreground/[0.03] px-2 py-2 text-center text-xs font-semibold text-muted-foreground sm:text-sm"
+                >
+                  {DIA_LABEL[d]}
+                </div>
+              ))}
+              {diasColumnas.map((d, idx) => (
+                <div
+                  key={`col-${d}`}
+                  className={cn(
+                    "flex min-h-[2rem] min-w-0 flex-col gap-2 px-2 py-2",
+                    idx < diasColumnas.length - 1 && "border-r border-border",
+                    dndBusy && "pointer-events-none opacity-70",
+                  )}
+                >
+                  {localidades.map((loc) => {
+                    const celdas = grid.get(loc)?.get(d) ?? [];
+                    const mostrarZonaVacia =
+                      puedeMoverEnProgramaPublicado &&
+                      Boolean(programaParaGrilla?.id) &&
+                      payloadArrastrePrograma?.programaDocId === programaParaGrilla.id &&
+                      normLocalidadGrid(payloadArrastrePrograma.localidad) === normLocalidadGrid(loc) &&
+                      payloadArrastrePrograma.fromDia !== d &&
+                      celdas.length === 0;
+                    if (!celdas.length && !mostrarZonaVacia) return null;
+                    return (
+                      <div
+                        key={`${loc}-${d}`}
+                        className="flex flex-col gap-1"
+                        onDragOver={
+                          puedeMoverEnProgramaPublicado
+                            ? (ev) => {
+                                ev.preventDefault();
+                                ev.dataTransfer.dropEffect = "move";
+                              }
+                            : undefined
+                        }
+                        onDrop={
+                          puedeMoverEnProgramaPublicado
+                            ? (ev) => void ejecutarDropAvisoEnCelda(ev, loc, d)
+                            : undefined
+                        }
+                      >
+                        {localidades.length > 1 && celdas.length > 0 ? (
+                          <span
+                            className="truncate text-[10px] font-medium leading-none text-muted-foreground"
+                            title={loc !== etiquetaLocalidadEnPrograma(loc, programaParaGrilla?.slots) ? loc : undefined}
+                          >
+                            {etiquetaLocalidadEnPrograma(loc, programaParaGrilla?.slots)}
+                          </span>
+                        ) : null}
+                        {mostrarZonaVacia ? (
+                          <div className="flex min-h-9 items-center justify-center rounded-md border border-dashed border-border/90 bg-muted/25 px-1 text-center text-[10px] text-muted-foreground">
+                            Soltá para mover acá
                           </div>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        ) : null}
+                        <div className="flex flex-col items-stretch gap-1">
+                          {celdas.map((c, i) => {
+                            const docIdChip = c.programaDocId ?? programaParaGrilla.id;
+                            const ordenIdEfectiva = ordenServicioIdEfectivaEnPrograma(
+                              c.aviso,
+                              workOrderIdPorAvisoDocId,
+                            );
+                            return (
+                              <ProgramaChipAvisoConArrastre
+                                key={`${c.aviso.numero}-${i}`}
+                                programaDocId={docIdChip}
+                                loc={loc}
+                                diaCol={d}
+                                c={c}
+                                ordenServicioIdEfectiva={ordenIdEfectiva}
+                                {...chipEstadoServicioProps(
+                                  ordenIdEfectiva,
+                                  estadosServicioPorId,
+                                  loadingEstadosServicio,
+                                )}
+                                puedeArrastrar={Boolean(puedeMoverEnProgramaPublicado && docIdChip)}
+                                onDragPayloadStart={
+                                  puedeMoverEnProgramaPublicado ? setPayloadArrastrePrograma : undefined
+                                }
+                                onDragPayloadEnd={
+                                  puedeMoverEnProgramaPublicado ? () => setPayloadArrastrePrograma(null) : undefined
+                                }
+                                onAbrirDrawer={() => {
+                                  const slot = encuentraSlotParaChip(
+                                    programaParaGrilla,
+                                    loc,
+                                    d,
+                                    c.especialidad,
+                                    c.aviso.numero,
+                                  );
+                                  if (slot && docIdChip) {
+                                    setDrawer({
+                                      aviso: c.aviso,
+                                      slot,
+                                      programaDocId: docIdChip,
+                                    });
+                                  }
+                                }}
+                                chipClassNameBoton="inline-block w-full max-w-none cursor-pointer rounded-md border px-1.5 py-1 text-left text-[11px] font-medium leading-snug sm:text-xs"
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
           </div>
         </>
       ) : programaParaGrilla && !localidades.length ? (

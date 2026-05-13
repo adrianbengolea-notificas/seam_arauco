@@ -1,15 +1,16 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { actionBootstrapSession } from "@/app/actions/auth";
 import { getFirebaseAuth } from "@/firebase/firebaseClient";
 import {
   GoogleAuthProvider,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
-  createUserWithEmailAndPassword,
 } from "firebase/auth";
 import { DEFAULT_LOGIN_EMAIL } from "@/lib/config/app-config";
 import { mensajeErrorFirebaseParaUsuario } from "@/lib/firebase/mensaje-error-usuario";
@@ -25,6 +26,7 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"login" | "registro">("login");
   const [error, setError] = useState<string | null>(null);
+  const [resetSent, setResetSent] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function afterAuth(user: import("firebase/auth").User) {
@@ -61,6 +63,7 @@ function LoginForm() {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setResetSent(false);
     try {
       const auth = getFirebaseAuth();
       const cred =
@@ -77,6 +80,7 @@ function LoginForm() {
   async function onGoogle() {
     setBusy(true);
     setError(null);
+    setResetSent(false);
     try {
       const auth = getFirebaseAuth();
       const provider = new GoogleAuthProvider();
@@ -88,15 +92,32 @@ function LoginForm() {
     }
   }
 
+  async function onForgotPassword() {
+    const trimmed = email.trim();
+    if (!trimmed) {
+      setError("Ingresá tu email para recuperar la contraseña.");
+      setResetSent(false);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setResetSent(false);
+    try {
+      const auth = getFirebaseAuth();
+      await sendPasswordResetEmail(auth, trimmed);
+      setResetSent(true);
+    } catch (e) {
+      setError(mensajeErrorFirebaseParaUsuario(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Card className="mx-auto w-full max-w-md overflow-hidden shadow-md ring-1 ring-black/5 dark:ring-white/10">
       <div className="h-1 w-full bg-brand" aria-hidden />
       <CardHeader>
         <CardTitle className="text-xl">{mode === "login" ? "Ingresar" : "Crear cuenta"}</CardTitle>
-        <CardDescription>
-          Firebase Auth y perfil en Firestore. Usá la cuenta del dueño en Authentication (mismo email
-          que en configuración). Otras cuentas: primera vez como técnico salvo rol asignado en consola.
-        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex gap-2 text-sm">
@@ -107,7 +128,10 @@ function LoginForm() {
                 ? "border-b-2 border-brand px-2 py-1 font-semibold text-foreground"
                 : "px-2 py-1 text-muted hover:text-foreground"
             }
-            onClick={() => setMode("login")}
+            onClick={() => {
+              setMode("login");
+              setResetSent(false);
+            }}
           >
             Login
           </button>
@@ -119,7 +143,10 @@ function LoginForm() {
                 ? "border-b-2 border-brand px-2 py-1 font-semibold text-foreground"
                 : "px-2 py-1 text-muted hover:text-foreground"
             }
-            onClick={() => setMode("registro")}
+            onClick={() => {
+              setMode("registro");
+              setResetSent(false);
+            }}
           >
             Registro
           </button>
@@ -128,6 +155,11 @@ function LoginForm() {
         {error ? (
           <p className="rounded-lg border border-red-200/90 bg-red-50/95 px-3 py-2.5 text-sm text-red-900 dark:border-red-900/70 dark:bg-red-950/50 dark:text-red-100">
             {error}
+          </p>
+        ) : null}
+        {resetSent ? (
+          <p className="rounded-lg border border-emerald-200/90 bg-emerald-50/95 px-3 py-2.5 text-sm text-emerald-900 dark:border-emerald-900/70 dark:bg-emerald-950/50 dark:text-emerald-100">
+            Si ese correo está registrado, te enviamos un enlace para restablecer la contraseña.
           </p>
         ) : null}
 
@@ -159,6 +191,18 @@ function LoginForm() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
+            {mode === "login" ? (
+              <div className="flex justify-end pt-0.5">
+                <button
+                  type="button"
+                  className="text-xs font-medium text-brand underline-offset-2 hover:underline disabled:pointer-events-none disabled:opacity-50"
+                  disabled={busy}
+                  onClick={() => void onForgotPassword()}
+                >
+                  Olvidé mi contraseña
+                </button>
+              </div>
+            ) : null}
           </div>
           <Button type="submit" className="w-full" disabled={busy}>
             {busy ? "Procesando…" : mode === "login" ? "Entrar" : "Registrar"}

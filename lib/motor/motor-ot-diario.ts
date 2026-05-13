@@ -131,7 +131,7 @@ export async function runMotorOtDiario(opts?: RunMotorOtDiarioOptions): Promise<
       db
         .collection(COLLECTIONS.work_orders)
         .where("centro", "==", c)
-        .where("archivada", "not-in", [true])
+        .where("archivada", "==", false)
         .orderBy("created_at", "desc")
         .limit(LIMITE_ORDENES_MOTOR_RECENT)
         .get(),

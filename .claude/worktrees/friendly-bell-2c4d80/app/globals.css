@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+/*
+ * Arauco-Seam — mix SEAM + Arauco
+ * SEAM: barra oscura, blanco, acento rojo único
+ * Arauco: contenido claro, tipografía marrón/carbón, toques naranja y verde lima muy puntuales
+ */
+:root {
+  /* Contenido tipo Arauco (claro, limpio) */
+  --background: oklch(0.992 0.004 85);
+  --foreground: oklch(0.28 0.025 55);
+  --muted-fg: oklch(0.48 0.02 55);
+  --surface: oklch(1 0.003 85);
+  --border: oklch(0.9 0.012 70);
+
+  /* SEAM — rojo acción principal */
+  --brand: oklch(0.52 0.2 25);
+  --brand-hover: oklch(0.46 0.21 25);
+  --brand-foreground: oklch(0.99 0.005 95);
+
+  /* Arauco — secundarios restringidos (naranja bloques, lima = éxito/KPI) */
+  --accent-warm: oklch(0.62 0.15 55);
+  --accent-lime: oklch(0.58 0.17 128);
+
+  /* Barra superior tipo SEAM */
+  --header-bg: oklch(0.26 0.018 265);
+  --header-fg: oklch(0.98 0.004 95);
+  --header-muted: oklch(0.68 0.015 95);
+
+  --ring: oklch(0.52 0.2 25 / 0.35);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.2 0.02 265);
+    --foreground: oklch(0.97 0.01 85);
+    --muted-fg: oklch(0.68 0.02 85);
+    --surface: oklch(0.24 0.022 265);
+    --border: oklch(0.38 0.02 265);
+    --header-bg: oklch(0.2 0.022 265);
+    --brand: oklch(0.58 0.19 25);
+    --brand-hover: oklch(0.52 0.2 25);
+    --brand-foreground: oklch(0.99 0.005 95);
+    --accent-warm: oklch(0.7 0.14 55);
+    --accent-lime: oklch(0.65 0.15 128);
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted-fg);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-accent-warm: var(--accent-warm);
+  --color-accent-lime: var(--accent-lime);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-header: var(--header-bg);
+  --color-header-fg: var(--header-fg);
+  --color-header-muted: var(--header-muted);
+  --font-sans: var(--font-sans-app), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono-app), ui-monospace, monospace;
+  --radius-card: 0.875rem;
+}
+
+@layer base {
+  html {
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+  }
+
+  ::selection {
+    background: color-mix(in oklch, var(--brand) 30%, transparent);
+    color: var(--foreground);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* Fondo contenido: casi plano, leve calidez (Arauco) */
+.app-backdrop {
+  background-color: var(--background);
+  background-image: radial-gradient(
+    ellipse 140% 80% at 50% -30%,
+    color-mix(in oklch, var(--accent-warm) 6%, transparent),
+    transparent 55%
+  );
+}
+
+@media (prefers-color-scheme: dark) {
+  .app-backdrop {
+    background-image: radial-gradient(
+      ellipse 120% 70% at 80% -20%,
+      color-mix(in oklch, var(--brand) 8%, transparent),
+      transparent 50%
+    );
+  }
+}

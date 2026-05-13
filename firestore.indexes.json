@@ -1,0 +1,361 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "materiales_ot",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "schema_version", "order": "ASCENDING" },
+        { "fieldPath": "creado_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "materiales_ot",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "ot_tipo", "order": "ASCENDING" },
+        { "fieldPath": "creado_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "materiales_ot",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "ot_especialidad", "order": "ASCENDING" },
+        { "fieldPath": "creado_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "materiales_ot",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "origen", "order": "ASCENDING" },
+        { "fieldPath": "creado_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "materiales_ot",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "schema_version", "order": "ASCENDING" },
+        { "fieldPath": "normalizacion", "order": "ASCENDING" },
+        { "fieldPath": "creado_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "stock_movimientos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "materialId", "order": "ASCENDING" },
+        { "fieldPath": "fecha", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "updated_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "slots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dia_semana", "order": "ASCENDING" },
+        { "fieldPath": "orden_en_dia", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "plan_rows",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dia_semana", "order": "ASCENDING" },
+        { "fieldPath": "orden", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "programa_semanal",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "fechaInicio", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "tecnico_asignado_uid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "tecnico_asignado_uid", "order": "ASCENDING" },
+        { "fieldPath": "updated_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "tecnico_asignado_uid", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "asset_id", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "asset_id", "order": "ASCENDING" },
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "tipo_trabajo", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "tipo_trabajo", "order": "ASCENDING" },
+        { "fieldPath": "estado", "order": "ASCENDING" },
+        { "fieldPath": "fecha_fin_ejecucion", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "avisos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "frecuencia_plan_mtsa", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "avisos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "tipo", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "avisos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "frecuencia", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "avisos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "n_aviso", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "estado", "order": "ASCENDING" },
+        { "fieldPath": "fecha_inicio_programada", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "asset_id", "order": "ASCENDING" },
+        { "fieldPath": "fecha_inicio_programada", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "avisos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "clave_mantenimiento", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "clave_mantenimiento", "order": "ASCENDING" },
+        { "fieldPath": "estado", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "fecha_inicio_programada", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "n_ot", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "aviso_numero", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "archivada", "order": "ASCENDING" },
+        { "fieldPath": "updated_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "created_at", "order": "ASCENDING" },
+        { "fieldPath": "archivada", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "archivada", "order": "ASCENDING" },
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "updated_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "archivada", "order": "ASCENDING" },
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "archivada", "order": "ASCENDING" },
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "tecnico_asignado_uid", "order": "ASCENDING" },
+        { "fieldPath": "updated_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "archivada", "order": "ASCENDING" },
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "tecnico_asignado_uid", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "archivada", "order": "ASCENDING" },
+        { "fieldPath": "asset_id", "order": "ASCENDING" },
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "archivada", "order": "ASCENDING" },
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "fecha_inicio_programada", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "archivada", "order": "ASCENDING" },
+        { "fieldPath": "fecha_inicio_programada", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "archivada", "order": "ASCENDING" },
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "assets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "especialidad_predeterminada", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "assets",
+      "fieldPath": "especialidad_predeterminada",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION" }
+      ]
+    }
+  ]
+}

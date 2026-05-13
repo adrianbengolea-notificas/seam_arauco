@@ -1,0 +1,127 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "materiales_ot",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "schema_version", "order": "ASCENDING" },
+        { "fieldPath": "creado_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "materiales_ot",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "ot_tipo", "order": "ASCENDING" },
+        { "fieldPath": "creado_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "materiales_ot",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "ot_especialidad", "order": "ASCENDING" },
+        { "fieldPath": "creado_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "materiales_ot",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "origen", "order": "ASCENDING" },
+        { "fieldPath": "creado_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "materiales_ot",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "schema_version", "order": "ASCENDING" },
+        { "fieldPath": "normalizacion", "order": "ASCENDING" },
+        { "fieldPath": "creado_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "stock_movimientos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "materialId", "order": "ASCENDING" },
+        { "fieldPath": "fecha", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "updated_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" },
+        { "fieldPath": "archivada", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "slots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dia_semana", "order": "ASCENDING" },
+        { "fieldPath": "orden_en_dia", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "programa_semanal",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "fechaInicio", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "work_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "tecnico_asignado_uid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "avisos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "frecuencia_plan_mtsa", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "avisos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "tipo", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "avisos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centro", "order": "ASCENDING" },
+        { "fieldPath": "frecuencia", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

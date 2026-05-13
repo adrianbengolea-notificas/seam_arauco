@@ -1,0 +1,248 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDocPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function userDoc() {
+      return get(userDocPath());
+    }
+
+    /**
+     * Centro y rol efectivos: preferir `users/{uid}` (misma fuente que la UI y `requirePermiso`).
+     * Si el JWT tiene claims viejos tras un cambio de rol/centro, priorizar token acá negaba lecturas
+     * (p. ej. consulta OT por centro como admin mientras el token seguía como técnico).
+     */
+    function callerCentro() {
+      return (exists(userDocPath())
+        && userDoc().data.centro is string
+        && userDoc().data.centro != '')
+        ? userDoc().data.centro
+        : (request.auth.token.centro != null && request.auth.token.centro != ''
+          ? request.auth.token.centro
+          : '');
+    }
+
+    function callerRolRaw() {
+      return (exists(userDocPath())
+        && userDoc().data.rol is string
+        && userDoc().data.rol != '')
+        ? userDoc().data.rol
+        : (request.auth.token.rol is string && request.auth.token.rol != ''
+          ? request.auth.token.rol
+          : 'tecnico');
+    }
+
+    /** Canonicaliza rol; valores desconocidos → técnico (evita permission-denied en lecturas). */
+    function callerRol() {
+      let r = callerRolRaw();
+      return r == 'super_admin'
+        ? 'superadmin'
+        : r == 'cliente_arauco'
+          ? 'cliente_arauco'
+          : (r == 'tecnico' || r == 'supervisor' || r == 'admin' || r == 'superadmin')
+            ? r
+            : isSuperadminRol(r)
+              ? 'superadmin'
+              : 'tecnico';
+    }
+
+    function isSuperadminRol(r) {
+      return r == 'superadmin' || r == 'super_admin';
+    }
+
+    function roleTecnicoUp() {
+      let r = callerRol();
+      return r == 'tecnico' || r == 'supervisor' || r == 'admin' || isSuperadminRol(r);
+    }
+
+    function roleClienteArauco() {
+      return callerRol() == 'cliente_arauco';
+    }
+
+    function puedeLeerComoOperativo() {
+      return roleTecnicoUp() || roleClienteArauco();
+    }
+
+    function roleSupervisorUp() {
+      let r = callerRol();
+      return r == 'supervisor' || r == 'admin' || isSuperadminRol(r);
+    }
+
+    function roleAdminPlantaUp() {
+      let r = callerRol();
+      return r == 'admin' || isSuperadminRol(r);
+    }
+
+    function workOrderData(woId) {
+      return get(/databases/$(database)/documents/work_orders/$(woId)).data;
+    }
+
+    /**
+     * Lectura OT desde el mapa `data` (p. ej. `resource.data` en el documento raíz).
+     * Importante: en consultas/listas, usar `resource.data` evita `get()` extra por doc y
+     * alinea la regla con lo que Firestore evalúa en list/query (menos permission-denied).
+     */
+    function canReadWorkOrderData(data) {
+      let r = callerRol();
+      return isSuperadminRol(r)
+        ? true
+        : r == 'cliente_arauco'
+          ? data.centro == callerCentro()
+          : (r == 'admin' || r == 'supervisor')
+            ? data.centro == callerCentro()
+            : r == 'tecnico' && data.tecnico_asignado_uid == request.auth.uid;
+    }
+
+    /** Subcolecciones: leer datos de la OT padre vía get(). */
+    function canReadWorkOrder(woId) {
+      return canReadWorkOrderData(workOrderData(woId));
+    }
+
+    function canMutateWorkOrderData(data) {
+      let r = callerRol();
+      return r == 'cliente_arauco' ? false : canReadWorkOrderData(data);
+    }
+
+    function canMutateWorkOrder(woId) {
+      return canMutateWorkOrderData(workOrderData(woId));
+    }
+
+    function targetUserCentro(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data.centro;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (
+        request.auth.uid == userId
+        || (callerRol() == 'admin' && targetUserCentro(userId) == callerCentro())
+        || isSuperadminRol(callerRol())
+      );
+      allow write: if false;
+    }
+
+    match /admin_audit_log/{id} {
+      allow read, write: if false;
+    }
+
+    match /assets/{id} {
+      allow read: if puedeLeerComoOperativo();
+      allow write: if roleAdminPlantaUp();
+    }
+
+    match /equipos/{id} {
+      allow read: if puedeLeerComoOperativo();
+      allow write: if roleSupervisorUp();
+    }
+
+    match /avisos/{id} {
+      allow read: if puedeLeerComoOperativo();
+      allow create, update: if roleTecnicoUp();
+      allow delete: if roleAdminPlantaUp();
+    }
+
+    match /{path=**}/materiales_ot/{lineId} {
+      allow read: if roleTecnicoUp() || roleClienteArauco();
+    }
+
+    match /work_orders/{woId} {
+      allow read: if signedIn() && canReadWorkOrderData(resource.data);
+      allow create: if roleSupervisorUp()
+        && (isSuperadminRol(callerRol()) || request.resource.data.centro == callerCentro());
+      allow update: if signedIn() && canMutateWorkOrderData(resource.data);
+      allow delete: if roleAdminPlantaUp();
+
+      match /checklist/{itemId} {
+        allow read: if signedIn() && canReadWorkOrder(woId);
+        allow write: if signedIn() && canMutateWorkOrder(woId);
+      }
+      match /materiales_ot/{lineId} {
+        allow read: if signedIn() && canReadWorkOrder(woId);
+        allow write: if signedIn() && canMutateWorkOrder(woId);
+      }
+      match /evidencias/{evId} {
+        allow read: if signedIn() && canReadWorkOrder(woId);
+        allow write: if signedIn() && canMutateWorkOrder(woId);
+      }
+      match /comentarios/{comentarioId} {
+        allow read: if signedIn() && canReadWorkOrder(woId);
+        allow create: if signedIn()
+          && callerRol() in ['cliente_arauco', 'supervisor', 'admin', 'superadmin']
+          && request.resource.data.autorId == request.auth.uid;
+        allow update, delete: if false;
+      }
+      match /historial/{hId} {
+        /* append por reglas cliente deshabilitado; lectura técnico asignado o supervisor+ */
+        allow read: if signedIn() && canReadWorkOrder(woId);
+        allow write: if false;
+      }
+      match /planilla_respuestas/{respId} {
+        allow read: if signedIn() && canReadWorkOrder(woId);
+        allow write: if signedIn() && canMutateWorkOrder(woId);
+      }
+    }
+
+    match /notificaciones/{uid}/items/{notifId} {
+      allow read, update: if signedIn() && request.auth.uid == uid;
+      allow create, delete: if false;
+    }
+
+    match /materials/{id} {
+      allow read: if signedIn() && !roleClienteArauco();
+      allow write: if roleAdminPlantaUp();
+    }
+
+    match /stock_movimientos/{id} {
+      allow read: if roleSupervisorUp();
+      allow write: if false;
+    }
+
+    match /weekly_schedule/{weekId} {
+      allow read: if signedIn();
+      allow write: if roleAdminPlantaUp();
+    }
+
+    match /weekly_schedule/{weekId}/{document=**} {
+      allow read: if signedIn();
+      allow write: if roleAdminPlantaUp();
+    }
+
+    match /programa_semanal/{semanaId} {
+      allow read: if puedeLeerComoOperativo();
+      allow write: if roleAdminPlantaUp();
+    }
+
+    match /counters/{id} {
+      allow read, write: if false;
+    }
+
+    match /planilla_templates/{templateId} {
+      /* Igual que otras colecciones: exigir sesión antes de evaluar rol (evita deny/err previo a auth). */
+      allow read: if signedIn() && puedeLeerComoOperativo();
+      allow write: if signedIn() && roleAdminPlantaUp();
+    }
+
+    match /centros/{centroId} {
+      allow read: if puedeLeerComoOperativo();
+      allow write: if isSuperadminRol(callerRol());
+    }
+
+    match /plan_mantenimiento/{planId} {
+      allow read: if signedIn() && roleSupervisorUp()
+        && (isSuperadminRol(callerRol()) || resource.data.centro == callerCentro());
+      allow write: if false;
+    }
+
+    match /propuestas_semana/{propId} {
+      allow read: if signedIn() && roleSupervisorUp()
+        && (isSuperadminRol(callerRol()) || resource.data.centro == callerCentro());
+      allow write: if false;
+    }
+  }
+}

@@ -1,0 +1,30 @@
+import type { Rol } from "@/lib/permisos/index";
+import type { Especialidad } from "@/modules/notices/types";
+import type { Timestamp } from "firebase/firestore";
+
+/** Rol canónico (JWT / lógica de permisos). */
+export type UserRol = Rol;
+
+/** Incluye valor legado almacenado en Firestore antes de la migración. */
+export type UserRole = UserRol | "super_admin";
+
+/** Perfil extendido en Firestore: users/{uid} */
+export type UserProfile = {
+  email: string;
+  display_name: string;
+  rol: UserRole;
+  centro: string;
+  /** Si hay más de un centro (p. ej. técnico en varias plantas), lista completa; si falta, aplica solo `centro`. */
+  centros_asignados?: string[];
+  planta_codigo?: string;
+  especialidades?: Especialidad[];
+  activo: boolean;
+  /** Suscripción push (formato JSON de PushSubscription). */
+  pushSubscription?: Record<string, unknown> | null;
+  /** `true` si el usuario activó push; false si eligió “más tarde”. */
+  pushHabilitado?: boolean;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+};
+
+export type UserProfileInput = Omit<UserProfile, "created_at" | "updated_at">;

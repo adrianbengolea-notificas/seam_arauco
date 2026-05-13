@@ -1,0 +1,35 @@
+# Settings for Backend (on Cloud Run).
+# See https://firebase.google.com/docs/app-hosting/configure#cloud-run
+runConfig:
+  minInstances: 0
+  # maxInstances: 100
+  # concurrency: 80
+  # cpu: 1
+  # memoryMiB: 512
+
+# Environment variables and secrets.
+# See https://firebase.google.com/docs/app-hosting/configure#user-defined-environment
+# (variables en la consola de Firebase tienen prioridad sobre este archivo).
+env:
+  - variable: NEXT_PUBLIC_APP_ORIGIN
+    value: https://seam-arauco-web--seamarauco.us-east4.hosted.app
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_DEFAULT_CENTRO
+    value: PC01
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_KNOWN_CENTROS
+    value: PC01,PF01,PM02,PT01
+    availability:
+      - BUILD
+      - RUNTIME
+
+  # Grant access to secrets in Cloud Secret Manager.
+  # See https://firebase.google.com/docs/app-hosting/configure#secret-parameters
+  # - variable: MY_SECRET
+  #   secret: mySecretRef

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(firebase firestore:indexes)",
+      "Bash(cat \"C:\\\\DEV\\\\adrianbengolea-notificas-seam_arauco\\\\app\\\\dashboard\\\\dashboard-panel.tsx\" 2>&1 | head -50)",
+      "Bash(grep -n \"semanas publicadas\\\\|No se pudieron\\\\|onSnapshot\\\\|query\\\\|where\\\\|orderBy\" /c/DEV/adrianbengolea-notificas-seam_arauco/app/programa-semanal/programa-semanal-client.tsx | head -50)",
+      "Bash(grep -n \"semanas publicadas\\\\|No se pudieron\\\\|onSnapshot\\\\|query\\\\|where\\\\|orderBy\" /c/DEV/adrianbengolea-notificas-seam_arauco/app/\"\\(dashboard\\)\"/programa/programa-client.tsx | head -60)",
+      "Bash(grep -r \"ndice compuesto\" /c/DEV/adrianbengolea-notificas-seam_arauco --include=\"*.tsx\" --include=\"*.ts\" 2>/dev/null)",
+      "Bash(git -C /c/DEV/adrianbengolea-notificas-seam_arauco show 96d5488:app/dashboard/dashboard-panel.tsx)",
+      "Bash(git -C /c/DEV/adrianbengolea-notificas-seam_arauco show ea6f967:app/dashboard/dashboard-panel.tsx)"
+    ]
+  }
+}

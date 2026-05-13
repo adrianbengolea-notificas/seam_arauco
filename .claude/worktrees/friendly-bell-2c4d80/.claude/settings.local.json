@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import reportlab; print\\('reportlab ok'\\)\")",
+      "PowerShell(python3 -c \"import reportlab; print\\('ok'\\)\" 2>&1)",
+      "PowerShell(py -c \"import reportlab; print\\('ok'\\)\" 2>&1)",
+      "PowerShell(cd \"$env:TEMP\"; mkdir pdf-gen -Force | Out-Null; cd pdf-gen; npm init -y 2>&1 | Select-Object -Last 3; npm install pdfkit 2>&1 | Select-Object -Last 5)",
+      "PowerShell($src = \"$env:TEMP\\\\pdf-gen\\\\instructivo-programacion-semanal.pdf\"; $dst = \"C:\\\\DEV\\\\adrianbengolea-notificas-seam_arauco\\\\.claude\\\\worktrees\\\\friendly-bell-2c4d80\\\\instructivo-programacion-semanal.pdf\"; Copy-Item $src $dst; \\(Get-Item $dst\\).Length)",
+      "Bash(grep -n \"CardTitle\\\\|<h[1-6]\\\\|Agendar\\\\|Plan por\\\\|texto\\\\|Excel\\\\|aviso\\\\|Semanal\\\\|Semestr\\\\|manual\\\\|período\\\\|Avisos\" /tmp/prog-client.txt | head -40)"
+    ]
+  }
+}

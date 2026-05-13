@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manual de Usuario — SEAM CMMS | Arauco</title>
+<style>
+  :root {
+    --brand: #1d6fb8;
+    --brand-light: #e8f1fb;
+    --brand-dark: #135091;
+    --gray-50: #f8f9fa;
+    --gray-100: #f1f3f5;
+    --gray-200: #e9ecef;
+    --gray-300: #dee2e6;
+    --gray-600: #6c757d;
+    --gray-800: #343a40;
+    --green: #2d7a3f;
+    --green-light: #eaf5ec;
+    --amber: #b45309;
+    --amber-light: #fef3c7;
+    --red: #c0392b;
+    --red-light: #fdecea;
+    --purple: #6f42c1;
+    --purple-light: #f0ebff;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; font-size: 15px; line-height: 1.6; color: var(--gray-800); background: #fff; }
+  a { color: var(--brand); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  nav { position: sticky; top: 0; z-index: 100; background: var(--brand); color: #fff; padding: 0 1.5rem; display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  nav .logo { font-size: 1.1rem; font-weight: 700; letter-spacing: .03em; padding: 0.85rem 0; white-space: nowrap; }
+  nav a { color: rgba(255,255,255,.85); font-size: .82rem; padding: 0.85rem 0; white-space: nowrap; transition: color .15s; }
+  nav a:hover { color: #fff; text-decoration: none; }
+
+  .container { max-width: 900px; margin: 0 auto; padding: 2.5rem 1.5rem 5rem; }
+  section { margin-bottom: 3rem; }
+
+  h1 { font-size: 2rem; font-weight: 700; color: var(--brand-dark); margin-bottom: .4rem; }
+  h2 { font-size: 1.45rem; font-weight: 700; color: var(--brand-dark); border-bottom: 2px solid var(--brand-light); padding-bottom: .4rem; margin-bottom: 1.2rem; }
+  h3 { font-size: 1.1rem; font-weight: 600; color: var(--gray-800); margin: 1.3rem 0 .5rem; }
+  h4 { font-size: .95rem; font-weight: 600; margin: 1rem 0 .3rem; }
+  p { margin-bottom: .7rem; }
+
+  .callout { border-left: 4px solid var(--brand); background: var(--brand-light); padding: .8rem 1rem; border-radius: 0 6px 6px 0; margin-bottom: 1rem; font-size: .9rem; }
+  .callout.warning { border-color: var(--amber); background: var(--amber-light); }
+  .callout.success { border-color: var(--green); background: var(--green-light); }
+  .callout.danger { border-color: var(--red); background: var(--red-light); }
+  .callout.purple { border-color: var(--purple); background: var(--purple-light); }
+
+  table { width: 100%; border-collapse: collapse; font-size: .88rem; margin: .8rem 0 1.3rem; }
+  th { background: var(--brand); color: #fff; padding: .55rem .75rem; text-align: left; font-weight: 600; font-size: .82rem; }
+  td { padding: .5rem .75rem; border-bottom: 1px solid var(--gray-200); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:nth-child(even) td { background: var(--gray-50); }
+
+  .flow { display: flex; align-items: flex-start; gap: 0; flex-wrap: wrap; margin: 1rem 0 1.5rem; }
+  .flow-step { background: var(--brand-light); border: 1.5px solid var(--brand); border-radius: 8px; padding: .55rem .9rem; font-size: .82rem; font-weight: 600; color: var(--brand-dark); white-space: nowrap; }
+  .flow-arrow { display: flex; align-items: center; padding: 0 .3rem; color: var(--brand); font-size: 1.1rem; font-weight: 700; }
+  .flow-step.done { background: var(--green-light); border-color: var(--green); color: var(--green); }
+  .flow-step.warn { background: var(--amber-light); border-color: var(--amber); color: var(--amber); }
+  .flow-step.gray { background: var(--gray-100); border-color: var(--gray-300); color: var(--gray-600); }
+
+  .screen { border: 1.5px solid var(--gray-300); border-radius: 10px; overflow: hidden; margin: 1.2rem 0 1.8rem; font-size: .82rem; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  .screen-title { background: var(--gray-100); border-bottom: 1px solid var(--gray-200); padding: .45rem .85rem; font-weight: 600; font-size: .8rem; color: var(--gray-600); letter-spacing: .04em; text-transform: uppercase; }
+  .screen-body { padding: .85rem 1rem; }
+  .screen-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .45rem .6rem; border-radius: 6px; border: 1px solid var(--gray-200); margin-bottom: .4rem; background: #fff; }
+  .screen-row.header-row { background: var(--gray-50); font-weight: 600; }
+
+  .badge { display: inline-block; padding: .15rem .55rem; border-radius: 999px; font-size: .72rem; font-weight: 600; }
+  .badge.green { background: var(--green-light); color: var(--green); }
+  .badge.amber { background: var(--amber-light); color: var(--amber); }
+  .badge.red { background: var(--red-light); color: var(--red); }
+  .badge.blue { background: var(--brand-light); color: var(--brand-dark); }
+  .badge.gray { background: var(--gray-100); color: var(--gray-600); }
+  .badge.purple { background: var(--purple-light); color: var(--purple); }
+
+  .sidebar-demo { display: flex; gap: 1.2rem; flex-wrap: wrap; margin: 1rem 0 1.5rem; }
+  .sidebar-panel { background: var(--gray-800); border-radius: 10px; padding: .85rem; min-width: 200px; font-size: .82rem; }
+  .sidebar-panel .sb-item { display: flex; align-items: center; gap: .55rem; padding: .4rem .6rem; border-radius: 6px; color: rgba(255,255,255,.75); }
+  .sidebar-panel .sb-item.active { background: rgba(255,255,255,.12); color: #fff; font-weight: 600; }
+  .sidebar-panel .sb-section { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: rgba(255,255,255,.4); padding: .6rem .6rem .25rem; margin-top: .4rem; }
+  .sidebar-panel .sb-divider { height: 1px; background: rgba(255,255,255,.1); margin: .4rem 0; }
+
+  .state-list { display: flex; flex-direction: column; gap: .4rem; margin: .7rem 0 1.1rem; }
+  .state-item { display: flex; align-items: flex-start; gap: .6rem; padding: .5rem .75rem; border-radius: 6px; border: 1px solid var(--gray-200); }
+  .state-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; margin-top: .35rem; }
+
+  code { background: var(--gray-100); padding: .1rem .35rem; border-radius: 4px; font-family: 'Cascadia Code', 'Fira Mono', monospace; font-size: .82em; }
+  kbd { display: inline-block; background: var(--gray-200); border: 1px solid var(--gray-300); border-radius: 4px; padding: .1rem .4rem; font-size: .78em; font-family: monospace; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; margin: .7rem 0; }
+  @media (max-width: 600px) { .two-col { grid-template-columns: 1fr; } }
+
+  ol.steps { padding-left: 0; list-style: none; counter-reset: step-counter; }
+  ol.steps li { counter-increment: step-counter; display: flex; gap: .85rem; margin-bottom: .9rem; }
+  ol.steps li::before { content: counter(step-counter); flex-shrink: 0; width: 28px; height: 28px; background: var(--brand); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: .82rem; font-weight: 700; margin-top: .1rem; }
+  ol.steps li .step-body { flex: 1; }
+  ol.steps li strong { display: block; }
+
+  hr { border: none; border-top: 1px solid var(--gray-200); margin: 2rem 0; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">⚙️ SEAM CMMS</div>
+  <a href="#intro">Introducción</a>
+  <a href="#roles">Roles</a>
+  <a href="#navegacion">Navegación</a>
+  <a href="#avisos">Avisos</a>
+  <a href="#motor">Motor</a>
+  <a href="#aprobacion">Aprobación</a>
+  <a href="#programa">Programa</a>
+  <a href="#ordenes-servicio">OTs</a>
+  <a href="#cierre">Cierre</a>
+  <a href="#materiales">Materiales</a>
+  <a href="#activos">Activos</a>
+  <a href="#admin">Administración</a>
+</nav>
+
+<div class="container">
+
+<!-- INTRO -->
+<section id="intro">
+  <h1>Manual de usuario — SEAM CMMS</h1>
+  <p style="color:var(--gray-600); margin-bottom:1.5rem;">Sistema de gestión de mantenimiento industrial · Arauco · Versión Abril 2026</p>
+
+  <div class="callout">
+    Este manual describe el funcionamiento real del sistema, incluyendo todos los flujos desde la importación de datos SAP hasta el cierre de OTs con firma digital.
+  </div>
+
+  <h3>¿Qué es SEAM?</h3>
+  <p>SEAM es el sistema de gestión de mantenimiento (CMMS) de Arauco. Centraliza:</p>
+  <ul style="padding-left:1.4rem; margin-bottom:.8rem;">
+    <li>Los <strong>avisos y planes de mantenimiento</strong> importados desde SAP</li>
+    <li>La <strong>programación semanal</strong> generada automáticamente o cargada desde Excel</li>
+    <li>Las <strong>OTs</strong> que ejecutan los técnicos</li>
+    <li>El <strong>inventario de materiales</strong> y <strong>activos (equipos)</strong> por centro</li>
+    <li>El <strong>historial de ejecuciones</strong>, firmas digitales y evidencias fotográficas</li>
+  </ul>
+
+  <h3>Flujo general del sistema</h3>
+  <div class="flow">
+    <div class="flow-step">Importar SAP (Excel)</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">Avisos + Planes</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">Motor diario (6 AM)</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step warn">Propuesta semanal</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step warn">Aprobación supervisor</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step done">OTs generadas</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step done">Ejecución → Cierre</div>
+  </div>
+
+  <p>Paralelamente, el supervisor puede cargar un <strong>plan de texto</strong> desde Excel o manualmente, que se muestra en la grilla del programa pero es independiente de las OTs.</p>
+</section>
+
+<!-- ROLES -->
+<section id="roles">
+  <h2>Roles de usuario</h2>
+  <p>Los roles son acumulativos: cada uno hereda todos los permisos del anterior.</p>
+
+  <table>
+    <tr>
+      <th>Rol</th>
+      <th>Descripción</th>
+      <th>Acciones clave</th>
+    </tr>
+    <tr>
+      <td><span class="badge blue">Cliente Arauco</span></td>
+      <td>Representante de Arauco en planta</td>
+      <td>Ver programa, ver OTs, comentar, firmar OTs como "usuario de planta"</td>
+    </tr>
+    <tr>
+      <td><span class="badge green">Técnico</span></td>
+      <td>Ejecuta tareas en campo</td>
+      <td>Ver sus OTs, iniciar, completar planillas, agregar materiales, firmar y cerrar OTs, descargar PDF</td>
+    </tr>
+    <tr>
+      <td><span class="badge amber">Supervisor</span></td>
+      <td>Lidera el equipo en un centro</td>
+      <td>Todo lo de técnico + ver todas las OTs del centro, crear OTs manuales, aprobar propuestas, editar programa semanal</td>
+    </tr>
+    <tr>
+      <td><span class="badge red">Admin</span></td>
+      <td>Jefe de planta / administrador</td>
+      <td>Todo lo de supervisor + gestionar usuarios, importar datos SAP, configurar el centro y sus módulos</td>
+    </tr>
+    <tr>
+      <td><span class="badge purple">Superadmin</span></td>
+      <td>Administrador global</td>
+      <td>Todo lo anterior + acceso a todos los centros, feature flags globales, dar de baja activos, auditoría global</td>
+    </tr>
+  </table>
+
+  <div class="callout warning">
+    <strong>Visibilidad de OTs:</strong> Los técnicos solo ven <em>sus propias</em> OTs. Los supervisores y admins ven todas las del centro.
+  </div>
+
+  <h3>Módulos opcionales por centro</h3>
+  <p>Los módulos <strong>Materiales</strong> y <strong>Activos</strong> pueden estar habilitados o deshabilitados por centro desde la Configuración. Si están deshabilitados, no aparecen en la navegación de ningún rol.</p>
+</section>
+
+<!-- NAVEGACIÓN -->
+<section id="navegacion">
+  <h2>Navegación</h2>
+  <p>La barra lateral muestra las secciones disponibles según tu rol:</p>
+
+  <div class="sidebar-demo">
+    <div>
+      <p style="font-size:.8rem; color:var(--gray-600); margin-bottom:.4rem;">Técnico</p>
+      <div class="sidebar-panel">
+        <div class="sb-item active">🏠 Panel</div>
+        <div class="sb-item">📅 Programa</div>
+        <div class="sb-item">🔧 Mis tareas</div>
+      </div>
+    </div>
+    <div>
+      <p style="font-size:.8rem; color:var(--gray-600); margin-bottom:.4rem;">Supervisor / Admin / Superadmin</p>
+      <div class="sidebar-panel" style="min-width:220px;">
+        <div class="sb-item">🏠 Panel</div>
+        <div class="sb-item active">📅 Programa</div>
+        <div class="sb-item">🔧 Mis tareas</div>
+        <div class="sb-item">📦 Materiales</div>
+        <div class="sb-item">🏭 Activos</div>
+        <div class="sb-divider"></div>
+        <div class="sb-section">Sistema (Admin+)</div>
+        <div class="sb-item">⚙️ Configuración</div>
+        <div class="sb-item">🔬 Diagnóstico</div>
+        <div class="sb-item">👥 Usuarios y centros</div>
+        <div class="sb-item">📋 Inventario</div>
+      </div>
+    </div>
+  </div>
+
+  <h3>Sub-páginas de Programa</h3>
+  <table>
+    <tr><th>Sección</th><th>Quién accede</th><th>Para qué sirve</th></tr>
+    <tr><td>Grilla del programa</td><td>Todos (lectura); Supervisor+ (edición)</td><td>Vista publicada: OTs y texto del plan agrupados por día</td></tr>
+    <tr><td>✏️ Editar / importar plan</td><td>Supervisor+</td><td>Cargar Excel, agendar OTs al calendario, carga manual línea a línea</td></tr>
+    <tr><td>Aprobar propuesta</td><td>Supervisor+</td><td>Revisar y aprobar/rechazar ítems generados por el motor</td></tr>
+    <tr><td>Seguimiento de ejecución</td><td>Todos</td><td>Estado real vs planificado por día y especialidad</td></tr>
+    <tr><td>⏰ Alertas de vencimiento</td><td>Todos</td><td>Estado de vencimiento de todos los avisos preventivos del centro</td></tr>
+  </table>
+</section>
+
+<!-- AVISOS -->
+<section id="avisos">
+  <h2>Avisos y planes de mantenimiento</h2>
+
+  <p>Los <strong>avisos</strong> son la unidad base del sistema. Cada aviso corresponde a un aviso SAP e incluye la descripción de la tarea, el equipo, la especialidad y la frecuencia. Cada aviso tiene un <strong>plan de mantenimiento</strong> que controla los vencimientos.</p>
+
+  <h3>Importar avisos desde SAP</h3>
+  <p>Ir a <strong>⚙️ Configuración → Importación</strong>. Seleccioná el modo y subí el archivo Excel exportado desde SAP.</p>
+
+  <div class="screen">
+    <div class="screen-title">⚙️ Configuración — Importación de datos SAP</div>
+    <div class="screen-body">
+      <div style="display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:.8rem;">
+        <span class="badge blue">Avisos preventivos M/T</span>
+        <span class="badge blue">Avisos S/A (semestral/anual)</span>
+        <span class="badge blue">Avisos correctivos</span>
+        <span class="badge green">Equipos / activos</span>
+        <span class="badge amber">Catálogo de materiales</span>
+        <span class="badge gray">Stock inicial</span>
+        <span class="badge gray">Reemplazar todo</span>
+        <span class="badge gray">Solo novedades</span>
+      </div>
+      <p style="font-size:.82rem; color:var(--gray-600);">El sistema valida columnas requeridas y muestra errores antes de guardar. Ver log de importaciones anteriores en la misma pantalla.</p>
+    </div>
+  </div>
+
+  <h3>Campos principales de un aviso</h3>
+  <table>
+    <tr><th>Campo</th><th>Descripción</th></tr>
+    <tr><td><code>n_aviso</code></td><td>Número SAP del aviso (identificador único)</td></tr>
+    <tr><td><code>texto_corto</code></td><td>Descripción de la tarea de mantenimiento</td></tr>
+    <tr><td><code>frecuencia</code></td><td>M (mensual) · T (trimestral) · S (semestral) · A (anual)</td></tr>
+    <tr><td><code>especialidad</code></td><td>AA (Aire acond.) · ELECTRICO · GG (Mantenimiento general)</td></tr>
+    <tr><td><code>ubicacion_tecnica</code></td><td>Localidad / ubicación según SAP</td></tr>
+    <tr><td><code>estado</code></td><td>ABIERTO → OT_GENERADA → CERRADO | ANULADO</td></tr>
+    <tr><td><code>estado_vencimiento</code></td><td><span class="badge green">ok</span> <span class="badge amber">proximo</span> <span class="badge red">vencido</span> <span class="badge gray">sin historial</span></td></tr>
+    <tr><td><code>dias_para_vencimiento</code></td><td>Días hasta el próximo vencimiento (negativo = vencido)</td></tr>
+    <tr><td><code>urgente</code></td><td>Si está marcado como urgente (prioridad máxima)</td></tr>
+  </table>
+
+  <h3>Ciclo de vencimiento</h3>
+  <p>El sistema recalcula el vencimiento cada vez que se cierra una OT preventiva:</p>
+  <div class="flow">
+    <div class="flow-step">OT cerrada</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">Registra fecha ejecución</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">Calcula próxima fecha (+ ciclo días)</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step done">Estado: ok</div>
+  </div>
+</section>
+
+<!-- MOTOR -->
+<section id="motor">
+  <h2>Motor de programación</h2>
+
+  <p>El <strong>motor greedy</strong> analiza el estado de todos los planes de mantenimiento del centro y genera automáticamente una <strong>propuesta semanal</strong> con las tareas que deben ejecutarse.</p>
+
+  <div class="callout">
+    <strong>Cuándo corre:</strong> Todos los días a las 6:00 AM hora Argentina (America/Argentina/Buenos_Aires). También puede ejecutarse manualmente desde 🔬 Diagnóstico.
+  </div>
+
+  <h3>Lógica de selección</h3>
+  <ol class="steps">
+    <li><div class="step-body"><strong>Lee avisos activos del centro</strong><br>Considera solo avisos en estado ABIERTO que venzan o ya estén vencidos en los próximos días.</div></li>
+    <li><div class="step-body"><strong>Aplica prioridades</strong><br>Urgentes (P1) → Vencidos (P2) → Próximos a vencer (P3). Dentro de cada grupo, ordena por días restantes.</div></li>
+    <li><div class="step-body"><strong>Distribuye entre días</strong><br>Asigna tareas de lunes a sábado según la carga estimada por especialidad, evitando sobrecargar un día.</div></li>
+    <li><div class="step-body"><strong>Evita duplicados</strong><br>Si el aviso ya fue incluido en una propuesta de esta semana (<code>incluido_en_semana</code>), no se vuelve a incluir.</div></li>
+    <li><div class="step-body"><strong>Genera la propuesta</strong><br>Crea el documento de propuesta con todos los ítems, métricas (total OTs, vencidos incluidos/postergados, carga por especialidad).</div></li>
+  </ol>
+
+  <h3>Estados de la propuesta semanal</h3>
+  <div class="state-list">
+    <div class="state-item"><div class="state-dot" style="background:var(--amber)"></div><div><strong>pendiente_aprobacion</strong> — Generada por el motor, esperando revisión del supervisor. Banner en el programa: "⏳ Hay ítems pendientes de aprobación".</div></div>
+    <div class="state-item"><div class="state-dot" style="background:var(--brand)"></div><div><strong>aprobada</strong> — Supervisor aprobó ítems; OTs generadas automáticamente.</div></div>
+    <div class="state-item"><div class="state-dot" style="background:var(--green)"></div><div><strong>ejecutando</strong> — Técnicos ejecutando las OTs.</div></div>
+    <div class="state-item"><div class="state-dot" style="background:var(--gray-600)"></div><div><strong>cerrada</strong> — Todas las OTs del período cerradas o anuladas.</div></div>
+  </div>
+
+  <div class="callout warning">
+    <strong>Auto-aprobación:</strong> Si la propuesta no es revisada en 48 horas, puede activarse la aprobación automática según la configuración del centro. El banner de la propuesta desaparece cuando todos los ítems dejan de estar en estado "propuesta" (aprobados o rechazados).
+  </div>
+</section>
+
+<!-- APROBACIÓN -->
+<section id="aprobacion">
+  <h2>Aprobación de propuesta semanal</h2>
+
+  <p>Accedé desde <strong>📅 Programa → Aprobar propuesta</strong> (Supervisor+). Revisás los ítems generados por el motor y decidís cuáles se convierten en OTs.</p>
+
+  <div class="screen">
+    <div class="screen-title">Aprobar propuesta — semana 2026-W16 · Centro Valdivia</div>
+    <div class="screen-body">
+      <div style="display:flex; gap:.5rem; margin-bottom:.7rem; flex-wrap:wrap; font-size:.8rem; align-items:center;">
+        <span style="color:var(--gray-600)">Filtros:</span>
+        <span class="badge gray">Día</span>
+        <span class="badge gray">Especialidad</span>
+        <span class="badge gray">Tipo</span>
+        <span class="badge gray">Prioridad</span>
+        <span class="badge amber">Solo pendientes ✓</span>
+      </div>
+      <div class="screen-row header-row">
+        <span style="flex:2">Aviso · Descripción</span>
+        <span>Día</span>
+        <span>Esp.</span>
+        <span>Min.</span>
+        <span>Estado</span>
+        <span>Acc.</span>
+      </div>
+      <div class="screen-row">
+        <span style="flex:2"><strong>40012345</strong> · Cambio filtro compresor AA-TK100</span>
+        <span>Lun</span><span>AA</span><span>45</span>
+        <span><span class="badge amber">propuesta</span></span>
+        <span style="display:flex;gap:.3rem;"><kbd>✓</kbd><kbd>✗</kbd></span>
+      </div>
+      <div class="screen-row">
+        <span style="flex:2"><strong>40012346</strong> · Revisión compresor C-201</span>
+        <span>Mar</span><span>GG</span><span>90</span>
+        <span><span class="badge green">aprobada</span></span>
+        <span>—</span>
+      </div>
+      <div class="screen-row">
+        <span style="flex:2"><strong>40012347</strong> · Insp. tablero eléctrico sala máq.</span>
+        <span>Mié</span><span>Elec</span><span>60</span>
+        <span><span class="badge red">rechazada</span></span>
+        <span>—</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>Acciones disponibles</h3>
+  <div class="two-col">
+    <div>
+      <h4>Por ítem (individual)</h4>
+      <ul style="padding-left:1.2rem; font-size:.9rem; margin-bottom:0;">
+        <li>Checkbox para selección múltiple</li>
+        <li>✓ Aprobar → genera OT para ese aviso</li>
+        <li>✗ Rechazar → excluye de esta semana</li>
+      </ul>
+    </div>
+    <div>
+      <h4>Acciones en bloque</h4>
+      <ul style="padding-left:1.2rem; font-size:.9rem; margin-bottom:0;">
+        <li><strong>Aprobar/Rechazar seleccionados</strong> (con checkbox)</li>
+        <li><strong>Aprobar todos los visibles</strong> (filtros actuales)</li>
+        <li><strong>Aprobar todos los pendientes</strong> (sin filtros)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout success">
+    Al aprobar un ítem se genera automáticamente una <strong>OT</strong> con todos los datos del aviso. La OT queda en estado <strong>ABIERTA</strong>, lista para que el técnico la ejecute desde "🔧 Mis tareas".
+  </div>
+
+  <h3>¿Por qué el motor incluyó este aviso?</h3>
+  <p>Cada ítem de la propuesta muestra el campo <code>razon_incluida</code>: si está vencido, cuántos días lleva vencido, si es urgente, etc. Esto ayuda al supervisor a priorizar la aprobación.</p>
+</section>
+
+<!-- PROGRAMA -->
+<section id="programa">
+  <h2>Programa semanal</h2>
+
+  <p>El programa tiene <strong>dos capas independientes</strong> que se muestran juntas en la grilla publicada:</p>
+
+  <div class="two-col">
+    <div class="callout" style="margin:0">
+      <strong>📌 OTs agendadas al calendario</strong><br>
+      OTs reales (con número de OT, técnico asignado, estado). Se crean al aprobar la propuesta del motor o manualmente.
+    </div>
+    <div class="callout purple" style="margin:0">
+      <strong>📝 Texto del plan</strong><br>
+      Contenido libre: localidad + especialidad + descripción de trabajos. Se importa desde Excel o se carga manualmente. <em>No genera OTs</em>.
+    </div>
+  </div>
+
+  <h3 style="margin-top:1.5rem;">Vista del programa publicado (grilla)</h3>
+
+  <div class="screen">
+    <div class="screen-title">📅 Programa — semana 2026-W16</div>
+    <div class="screen-body">
+      <div style="display:flex; gap:.5rem; margin-bottom:.8rem; flex-wrap:wrap; font-size:.82rem; align-items:center;">
+        <span style="border:1.5px solid var(--brand); border-radius:6px; padding:.2rem .6rem; font-weight:600; color:var(--brand); font-size:.8rem;">📋 Ver programa publicado</span>
+        <span style="border:1.5px solid var(--gray-300); border-radius:6px; padding:.2rem .6rem; color:var(--gray-600); font-size:.8rem;">✏️ Editar / importar plan</span>
+      </div>
+      <p style="font-size:.78rem; color:var(--gray-600); margin-bottom:.6rem; font-weight:600; text-transform:uppercase; letter-spacing:.04em;">Lunes</p>
+      <div class="screen-row">
+        <div><span class="badge green" style="margin-right:.4rem;">OT</span><strong>OT-0042</strong> · AA-TK100 · Cambio filtro AA · <span class="badge amber">EN_EJECUCION</span></div>
+        <span class="badge blue">AA</span>
+      </div>
+      <div class="screen-row" style="border-left:3px solid var(--purple);">
+        <div><span class="badge gray" style="margin-right:.4rem; background:var(--purple-light); color:var(--purple);">PLAN</span>Celulosa · GG · Revisión bomba hidráulica P-105</div>
+        <span class="badge blue">GG</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>Editar / importar plan (Supervisor+)</h3>
+  <p>Cambiá al modo <strong>✏️ Editar / importar plan</strong> desde el selector en la parte superior del programa.</p>
+
+  <h4>Sección 1: 📌 Agendar OT en el calendario</h4>
+  <p>Seleccioná una OT existente y activa, elegí el día y el turno (A/B/C), pulsá "📌 Agendar en esta semana". La orden aparece inmediatamente en la grilla publicada.</p>
+
+  <h4>Sección 2: 📝 Plan de texto semanal</h4>
+  <p>Cargá el contenido de texto del programa (separado de las OTs):</p>
+
+  <table>
+    <tr><th>Modo</th><th>Cómo funciona</th></tr>
+    <tr>
+      <td><strong>Importar Excel</strong></td>
+      <td>Subí el archivo .xlsx del programa semanal. El sistema detecta las semanas ISO por hoja. Elegí el alcance (semana actual o todas las semanas del archivo) y confirmá.</td>
+    </tr>
+    <tr>
+      <td><strong>Carga manual</strong></td>
+      <td>Usá los avisos de referencia para pre-llenar el formulario, o escribí directamente. Completá localidad, especialidad, día y descripción. Pulsá "＋ Agregar línea al plan".</td>
+    </tr>
+  </table>
+
+  <h4>Avisos de referencia rápida</h4>
+  <table>
+    <tr><th>Pestaña</th><th>Qué muestra</th><th>Acción disponible</th></tr>
+    <tr>
+      <td><strong>Preventivos del mes / trimestre</strong></td>
+      <td>Avisos con frecuencia M o T del centro</td>
+      <td>"↓ Usar en formulario" — pre-llena especialidad y texto en el formulario de abajo</td>
+    </tr>
+    <tr>
+      <td><strong>Semestrales / anuales vencidos o próximos</strong></td>
+      <td>Avisos S/A con estado vencido <span class="badge red">⚠ vencido</span> o próximo <span class="badge amber">próximo</span></td>
+      <td>"Publicar en grilla →" — agrega directamente al programa publicado (usa el día seleccionado)</td>
+    </tr>
+  </table>
+
+  <div class="callout warning">
+    <strong>Diferencia importante:</strong> "↓ Usar en formulario" solo pre-llena el formulario — todavía tenés que pulsar "＋ Agregar línea al plan". En cambio "Publicar en grilla →" agrega inmediatamente el aviso S/A al programa publicado del día seleccionado.
+  </div>
+</section>
+
+<!-- OTs -->
+<section id="ordenes-servicio">
+  <h2>OTs</h2>
+
+  <p>Accedé desde <strong>🔧 Mis tareas</strong>.</p>
+
+  <h3>Tarjeta de OT en la lista</h3>
+  <div class="screen">
+    <div class="screen-title">🔧 Mis tareas — vista lista</div>
+    <div class="screen-body">
+      <div class="screen-row">
+        <div style="flex:1">
+          <div style="font-weight:700; font-family:monospace;">OT-0042</div>
+          <div style="font-size:.8rem; color:var(--gray-600);">Aviso 40012345 · AA-TK100 · Cambio filtro</div>
+          <div style="margin-top:.2rem; display:flex; gap:.3rem; flex-wrap:wrap;">
+            <span class="badge amber">EN_CURSO</span>
+            <span class="badge blue">AA</span>
+            <span class="badge gray">Preventivo · M</span>
+          </div>
+        </div>
+        <div style="text-align:right; font-size:.8rem; color:var(--gray-600);">
+          14/04/2026
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3>Estados de una OT</h3>
+  <div class="state-list">
+    <div class="state-item"><div class="state-dot" style="background:#aaa"></div><div><strong>BORRADOR</strong> — En creación; no visible para técnicos todavía</div></div>
+    <div class="state-item"><div class="state-dot" style="background:var(--brand)"></div><div><strong>ABIERTA</strong> → aparece en la lista del técnico como <span class="badge gray">PENDIENTE</span></div></div>
+    <div class="state-item"><div class="state-dot" style="background:var(--amber)"></div><div><strong>EN_EJECUCION</strong> → aparece como <span class="badge amber">EN_CURSO</span></div></div>
+    <div class="state-item"><div class="state-dot" style="background:var(--purple)"></div><div><strong>PENDIENTE_FIRMA_SOLICITANTE</strong> → también aparece como <span class="badge amber">EN_CURSO</span> (esperando firma del representante)</div></div>
+    <div class="state-item"><div class="state-dot" style="background:#17a2b8"></div><div><strong>LISTA_PARA_CIERRE</strong> → aparece como <span class="badge green">COMPLETADA</span></div></div>
+    <div class="state-item"><div class="state-dot" style="background:var(--green)"></div><div><strong>CERRADA</strong> → aparece como <span class="badge green">COMPLETADA</span>; actualiza el plan de mantenimiento</div></div>
+    <div class="state-item"><div class="state-dot" style="background:var(--red)"></div><div><strong>ANULADA</strong> → aparece como <span class="badge red">CANCELADA</span>; el plan <em>no</em> se reprograma automáticamente</div></div>
+  </div>
+
+  <h3>Crear OT manual (Supervisor+)</h3>
+  <p>Ir a <strong>🔧 Mis tareas → Nueva OT</strong>:</p>
+
+  <div class="screen">
+    <div class="screen-title">➕ Nueva OT</div>
+    <div class="screen-body" style="font-size:.85rem;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:.6rem;">
+        <div><strong>Tipo de trabajo *</strong><br><span class="badge amber">Correctivo</span> <span class="badge blue">Preventivo</span> <span class="badge red">Urgente</span></div>
+        <div><strong>Especialidad *</strong><br><span class="badge gray">AA · Electrico · GG</span></div>
+        <div><strong>Aviso SAP (opcional)</strong><br><code>Buscar por número de aviso</code></div>
+        <div><strong>Técnico asignado (opcional)</strong><br><code>Nombre del técnico</code></div>
+        <div style="grid-column:1/-1;"><strong>Nombre del área / equipo</strong><br><code>Ej. Compresor C-201 — Sala de máquinas</code></div>
+        <div style="grid-column:1/-1;"><strong>Descripción del trabajo</strong><br><code>Describí la tarea a realizar…</code></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout warning">
+    <strong>OT sin aviso SAP:</strong> Si creás una OT sin vinculación a un aviso, queda marcada como "Provisorio sin aviso SAP". Vinculala cuando el aviso se cree en SAP y se importe al sistema.
+  </div>
+</section>
+
+<!-- CIERRE -->
+<section id="cierre">
+  <h2>Ejecución y cierre de OTs</h2>
+
+  <p>El técnico sigue este flujo desde el campo:</p>
+
+  <ol class="steps">
+    <li><div class="step-body"><strong>Abrir la OT</strong><br>En "🔧 Mis tareas", encontrá la OT por número o filtrá por especialidad. Hacé click para ver el detalle completo.</div></li>
+    <li><div class="step-body"><strong>Iniciar la tarea → EN_EJECUCION</strong><br>Pulsá el botón "Iniciar". Se registra fecha y hora de inicio.</div></li>
+    <li><div class="step-body"><strong>Completar la planilla digital (si aplica)</strong><br>Según el tipo de OT (AA, Electrico, GG, Correctivo) puede requerir una planilla con campos específicos. Completá todos los campos antes de cerrar.</div></li>
+    <li><div class="step-body"><strong>Agregar materiales utilizados</strong><br>Listá cada ítem (descripción, cantidad, unidad). El sistema normaliza contra el catálogo con IA.</div></li>
+    <li><div class="step-body"><strong>Subir evidencias fotográficas</strong><br>Adjuntá fotos del trabajo realizado.</div></li>
+    <li><div class="step-body"><strong>Firma del técnico</strong><br>Firmá en el pad digital. Queda registrada con timestamp y UID de usuario.</div></li>
+    <li><div class="step-body"><strong>Firma del representante de Arauco (si aplica)</strong><br>El representante de planta firma en el mismo dispositivo. Estado → PENDIENTE_FIRMA_SOLICITANTE → LISTA_PARA_CIERRE.</div></li>
+    <li><div class="step-body"><strong>Cerrar la OT → CERRADA</strong><br>Confirmá el cierre. El sistema registra la ejecución en el plan de mantenimiento y calcula el próximo vencimiento automáticamente.</div></li>
+  </ol>
+
+  <h3>Secciones del detalle de OT</h3>
+  <table>
+    <tr><th>Sección</th><th>Contenido</th></tr>
+    <tr><td>Encabezado</td><td>Número OT, estado, aviso#, equipo, ubicación, especialidad, tipo</td></tr>
+    <tr><td>Acciones</td><td>Iniciar · Completar planilla · Agregar material · Firmar y cerrar · Descargar PDF</td></tr>
+    <tr><td>Planilla</td><td>Formulario digital según tipo (AA/Elec/GG/Correctivo)</td></tr>
+    <tr><td>Materiales</td><td>Lista de materiales usados; normalización IA; agregar/quitar</td></tr>
+    <tr><td>Evidencias</td><td>Galería de fotos; subir nuevas</td></tr>
+    <tr><td>Historial</td><td>Línea de tiempo de todos los eventos (creación, cambios de estado, firmas, materiales)</td></tr>
+    <tr><td>Comentarios</td><td>Notas y comunicación entre técnicos y supervisores</td></tr>
+  </table>
+
+  <div class="callout">
+    <strong>Modo offline:</strong> Si no tenés conexión, las acciones (firmas, cambios de estado, materiales) se guardan en cola y se sincronizan automáticamente al recuperar la conexión. No cerrés la app con acciones pendientes.
+  </div>
+</section>
+
+<!-- MATERIALES -->
+<section id="materiales">
+  <h2>Materiales e inventario</h2>
+  <p>Disponible para Supervisor+ si el módulo está habilitado en la configuración del centro.</p>
+
+  <div class="two-col">
+    <div>
+      <h3>📦 Catálogo de materiales</h3>
+      <p style="font-size:.9rem;">Listado de materiales con código, descripción, unidad y precio. Se importa desde Excel o se mantiene manualmente desde <strong>⚙️ Configuración</strong>.</p>
+    </div>
+    <div>
+      <h3>📋 Movimientos de stock</h3>
+      <p style="font-size:.9rem;">Registrá entradas y salidas. Las salidas vinculadas a OTs se registran automáticamente cuando el técnico agrega materiales en la OT.</p>
+    </div>
+  </div>
+
+  <h3>Normalización IA de materiales</h3>
+  <p>Cuando un técnico escribe un material en texto libre, el sistema lo compara con el catálogo:</p>
+  <table>
+    <tr><th>Confianza IA</th><th>Comportamiento</th></tr>
+    <tr><td><span class="badge green">Alta ≥ 0.8</span></td><td>Normaliza automáticamente contra el catálogo</td></tr>
+    <tr><td><span class="badge amber">Media 0.5–0.8</span></td><td>Sugiere el material; requiere confirmación manual</td></tr>
+    <tr><td><span class="badge red">Baja &lt; 0.5</span></td><td>Deja como texto libre; requiere revisión del supervisor</td></tr>
+  </table>
+</section>
+
+<!-- ACTIVOS -->
+<section id="activos">
+  <h2>Activos (equipos)</h2>
+  <p>Disponible si el módulo está habilitado en la configuración del centro.</p>
+
+  <table>
+    <tr><th>Acción</th><th>Quién</th><th>Descripción</th></tr>
+    <tr><td>Ver inventario</td><td>Todos</td><td>Lista con filtros por código, ubicación, especialidad, estado operativo</td></tr>
+    <tr><td>Escanear QR</td><td>Todos</td><td>Escaneá el código QR del equipo para ir directo a su ficha</td></tr>
+    <tr><td>Ver detalle</td><td>Todos</td><td>Ficha: código, denominación, ubicación, especialidad, historial de OTs</td></tr>
+    <tr><td>Crear / editar</td><td>Supervisor+</td><td>Alta o edición de datos (el código es <strong>inmutable</strong> una vez creado)</td></tr>
+    <tr><td>Dar de baja</td><td>Superadmin</td><td>Marca el activo como inoperativo; el motor deja de incluirlo en propuestas</td></tr>
+    <tr><td>Imprimir QR</td><td>Todos</td><td>Genera PDF con código QR para pegar en el equipo físico</td></tr>
+  </table>
+
+  <div class="callout warning">
+    <strong>Código inmutable:</strong> Una vez creado un activo, su código no puede modificarse. Si necesitás correcciones, contactá al administrador.
+  </div>
+</section>
+
+<!-- ADMIN -->
+<section id="admin">
+  <h2>Administración del sistema</h2>
+
+  <h3>⚙️ Configuración (Admin+)</h3>
+  <table>
+    <tr><th>Sección</th><th>Qué configura</th></tr>
+    <tr><td>General</td><td>Nombre del centro, módulos activos (Materiales, Activos), parámetros del motor, auto-aprobación de propuestas</td></tr>
+    <tr><td>Importación</td><td>Cargar Excel SAP (avisos, equipos, materiales, stock). Ver log de importaciones previas. Editar avisos importados.</td></tr>
+    <tr><td>Planillas digitales</td><td>Crear y editar plantillas de planillas (AA, Electrico, GG, Correctivo). Define los campos que aparecen en cada tipo de OT.</td></tr>
+  </table>
+
+  <h3>👥 Usuarios y centros (Admin+)</h3>
+  <p>Gestión de usuarios: crear, editar rol, asignar centro, activar/desactivar. El nuevo usuario recibe invitación por email.</p>
+
+  <h3>🔬 Diagnóstico (Admin+)</h3>
+  <ul style="padding-left:1.4rem; font-size:.9rem; margin-bottom:1rem;">
+    <li>Logs de ejecuciones del motor (métricas, errores, avisos procesados)</li>
+    <li>Estado de activación de usuarios (si recibieron y activaron la cuenta)</li>
+    <li>Ejecución manual del motor</li>
+  </ul>
+
+  <h3>⏰ Alertas de vencimiento</h3>
+  <table>
+    <tr><th>Estado</th><th>Significado</th></tr>
+    <tr><td><span class="badge green">ok</span></td><td>Al día — vence en más de 30 días</td></tr>
+    <tr><td><span class="badge amber">próximo</span></td><td>Vence en los próximos 30 días — el motor lo incluirá en la próxima propuesta</td></tr>
+    <tr><td><span class="badge red">vencido</span></td><td>Fecha de mantenimiento ya pasó — prioridad máxima</td></tr>
+    <tr><td><span class="badge gray">sin historial</span></td><td>Nunca ejecutado — el motor lo incluirá</td></tr>
+  </table>
+
+  <hr>
+
+  <h3>Preguntas frecuentes</h3>
+
+  <h4>¿Por qué no apareció la propuesta esta semana?</h4>
+  <p>El motor corre a las 6 AM. Si hubo error, podés forzar la generación desde <strong>🔬 Diagnóstico → Ejecutar motor manualmente</strong>. Verificá también que el centro tenga avisos activos con vencimientos próximos.</p>
+
+  <h4>¿El banner "Hay ítems pendientes de aprobación" no desaparece?</h4>
+  <p>El banner desaparece solo cuando <em>todos</em> los ítems de la propuesta pasan de estado "propuesta" a "aprobada" o "rechazada". Si algunos siguen en "propuesta", el banner permanece activo.</p>
+
+  <h4>¿Puedo editar el texto de un aviso importado de SAP?</h4>
+  <p>Sí, desde <strong>⚙️ Configuración → Importación → Lista de avisos</strong>. Los cambios se guardan en SEAM sin modificar SAP.</p>
+
+  <h4>¿Qué pasa si anulo una OT preventiva?</h4>
+  <p>La OT queda en estado ANULADA y el plan de mantenimiento <strong>no</strong> se actualiza — la próxima ejecución sigue siendo la original. El aviso vuelve a aparecer en la próxima propuesta del motor.</p>
+
+  <h4>¿Qué pasa si cierro una OT por error?</h4>
+  <p>El cierre actualiza el plan de mantenimiento y no se puede deshacer automáticamente. Contactá a un administrador para corregirlo manualmente.</p>
+
+  <h4>¿Cómo imprimo el comprobante de una OT?</h4>
+  <p>En el detalle de la OT, pulsá "Descargar PDF". Incluye datos del trabajo, planilla completada, materiales usados y firma digital.</p>
+
+  <h4>¿Qué significa "Provisorio sin aviso SAP"?</h4>
+  <p>Es una OT correctiva creada manualmente sin vincular a un aviso SAP. Debería vincularse luego cuando el aviso correspondiente se importe al sistema.</p>
+</section>
+
+<div style="text-align:center; color:var(--gray-600); font-size:.8rem; margin-top:3rem; padding-top:1.5rem; border-top:1px solid var(--gray-200);">
+  SEAM CMMS · Arauco · Manual de usuario v2 · Abril 2026
+</div>
+
+</div>
+</body>
+</html>

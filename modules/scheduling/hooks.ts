@@ -577,6 +577,7 @@ function mergeProgramasFusionDocs(
       slotsOut.push({
         ...s,
         localidad: `${c} · ${locOrig}`,
+        localidadDocPrograma: locOrig,
         programaOrigenDocId: docId,
       });
     }

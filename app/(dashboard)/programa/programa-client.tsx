@@ -82,6 +82,13 @@ function normLocalidadGrid(loc: string | undefined): string {
   return (loc?.trim() || "").trim() || "—";
 }
 
+/** `localidad` tal como está en Firestore para mutar la celda (fusión multi-planta usa prefijo "PC01 · " solo en UI). */
+function localidadCeldaFirestoreParaServidor(slot: SlotSemanal): string {
+  const docLoc = slot.localidadDocPrograma?.trim();
+  if (docLoc) return docLoc;
+  return slot.localidad?.trim() || "—";
+}
+
 const DIAS_ORDEN: DiaSemanaPrograma[] = [
   "lunes",
   "martes",
@@ -862,7 +869,7 @@ function AvisoDrawer({
         avisoFirestoreId: estado.aviso.avisoFirestoreId?.trim() || undefined,
         destDia: destDiaSeleccionado,
         from: {
-          localidad: estado.slot.localidad ?? "—",
+          localidad: localidadCeldaFirestoreParaServidor(estado.slot),
           dia: estado.slot.dia,
           especialidad: estado.slot.especialidad,
         },
@@ -904,7 +911,7 @@ function AvisoDrawer({
         workOrderId: ordenServicioExistenteId.trim(),
         programa: {
           programaDocId: estado.programaDocId.trim(),
-          localidad: estado.slot.localidad ?? "—",
+          localidad: localidadCeldaFirestoreParaServidor(estado.slot),
           dia: estado.slot.dia,
           especialidad: estado.slot.especialidad,
           avisoNumero: estado.aviso.numero.trim(),

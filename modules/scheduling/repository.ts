@@ -450,7 +450,7 @@ export async function clearWorkOrderIdEnProgramaSemanaAdmin(input: {
       const fid = a.avisoFirestoreId?.trim();
       const want = input.avisoFirestoreId?.trim();
       if (want && fid && fid !== want) continue;
-      if (want && !fid) continue;
+      /** Misma regla que `removeAvisoFromSlotsClone`: el slot puede no tener doc id aún. */
       const curWo = a.workOrderId?.trim();
       if (curWo !== woId) continue;
       const { workOrderId: _drop, ...rest } = a;
@@ -515,7 +515,7 @@ function removeAvisoFromSlotsClone(
     const fid = a.avisoFirestoreId?.trim();
     const want = avisoFirestoreId?.trim();
     if (want && fid && fid !== want) return false;
-    if (want && !fid) return false;
+    /** El slot a veces no tiene `avisoFirestoreId`; el cliente sí: alineamos por número SAP. */
     return true;
   });
   if (matchIdx < 0) return { slots, removed: null };

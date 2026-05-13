@@ -31,6 +31,11 @@ export type AvisoSlot = {
 
 export type SlotSemanal = {
   localidad: string;
+  /**
+   * Solo en fusión multi-planta: `localidad` se muestra como `PC01 · …` en la grilla; este campo repite el
+   * valor guardado en Firestore en `programa_semanal.slots[].localidad` (mutaciones / servidor).
+   */
+  localidadDocPrograma?: string;
   /** Si el slot viene de una fusión multi-planta, documento `programa_semanal` de origen (arrastre / panel). */
   programaOrigenDocId?: string;
   /** Denominación legible de ubicación (p. ej. desde plan/import); si falta, la UI formatea `localidad`. */

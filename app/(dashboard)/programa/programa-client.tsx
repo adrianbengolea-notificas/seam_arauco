@@ -18,6 +18,7 @@ import {
 import { mensajeErrorFirebaseParaUsuario } from "@/lib/firebase/mensaje-error-usuario";
 import { HORAS_ALERTA_PROPUESTA_SIN_VISTA } from "@/lib/config/limits";
 import { isSuperAdminRole } from "@/modules/users/roles";
+import { usuarioTieneCentro } from "@/modules/users/centros-usuario";
 import { etiquetaLocalidadSlot } from "@/lib/format/localidad-programa";
 import { cn } from "@/lib/utils";
 import { useAvisoLive } from "@/modules/notices/hooks";
@@ -165,6 +166,17 @@ function semanasOpcionesReprogramarAviso(centro: string, existentes: SemanaOpcio
     if (!ka && kb) return 1;
     return b.id.localeCompare(a.id);
   });
+}
+
+/** Prefijo `centro_` de un id `programa_semanal` / propuesta (`PC01_2026-W18`). */
+function centroDesdeProgramaDocId(programaDocId: string): string | null {
+  const id = programaDocId.trim();
+  if (!id) return null;
+  const sorted = [...KNOWN_CENTROS].sort((a, b) => b.length - a.length);
+  for (const c of sorted) {
+    if (id.startsWith(`${c}_`)) return c;
+  }
+  return null;
 }
 
 /** Resuelve `YYYY-Www` para el modo «todas las plantas» (acepta id doc o ISO en la URL). */
@@ -685,8 +697,10 @@ function SelectorVistaPrograma({
             <p>
               Lo que la cuadrilla usa para ver la semana: avisos en columnas por <strong>día</strong> de la semana, con
               los filtros de abajo. En el celular podés cambiar de <strong>fila</strong> (localidad) con los botones de
-              arriba. Es <strong>solo lectura</strong> salvo que tengas permiso para mover avisos (y una sola planta
-              elegida).
+              arriba. Es <strong>solo lectura</strong> salvo que tengas permiso para mover avisos: con{" "}
+              <strong>una planta</strong> en el filtro podés arrastrar o usar el panel; con{" "}
+              <strong>Todas las plantas</strong> el arrastre sigue desactivado, pero el panel del aviso permite
+              reprogramar en la planta de ese aviso si tenés permiso sobre ese centro.
             </p>
             {mostrarPestañaOperativa ? (
               <>
@@ -1137,6 +1151,15 @@ export function ProgramaClient() {
     "ot:ver_todas",
   );
 
+  const [drawer, setDrawer] = useState<DrawerState>(null);
+  const drawerCentroParaSemanas = useMemo(() => {
+    if (!vistaTodasPlantas) return undefined;
+    const pid = drawer?.programaDocId?.trim();
+    if (!pid) return undefined;
+    const c = centroDesdeProgramaDocId(pid);
+    return c && isCentroInKnownList(c) ? c : undefined;
+  }, [vistaTodasPlantas, drawer]);
+
   const { semanas: semanasSingle, loading: semanasLoadingSingle, error: semanasErrorSingle } = useSemanasDisponibles(
     vistaTodasPlantas ? undefined : centroEfectivo,
     user?.uid,
@@ -1154,16 +1177,25 @@ export function ProgramaClient() {
     },
   );
 
+  const { semanas: semanasDrawerAlcance } = useSemanasDisponibles(drawerCentroParaSemanas, user?.uid, {
+    incluirOtProgramadasSemana: true,
+    incluirPropuestasMotorSemana: puedeLeerMotorPropuestasEnSemanas,
+  });
+
   const semanasLoading = vistaTodasPlantas ? semanasLoadingTodas : semanasLoadingSingle;
   const semanasError = vistaTodasPlantas ? semanasErrorTodas : semanasErrorSingle;
   const semanasActivas = vistaTodasPlantas ? semanasTodas : semanasSingle;
 
   const semanasParaReprogramarDrawer = useMemo(() => {
-    if (vistaTodasPlantas) return [];
+    if (vistaTodasPlantas) {
+      const c = drawerCentroParaSemanas;
+      if (!c) return [];
+      return semanasOpcionesReprogramarAviso(c, semanasDrawerAlcance, SEMANAS_REPROGRAMAR_HORIZONTE_ADELANTE);
+    }
     const c = centroEfectivo.trim();
     if (!c || c === CENTRO_SELECTOR_TODAS_PLANTAS) return semanasSingle;
     return semanasOpcionesReprogramarAviso(c, semanasSingle, SEMANAS_REPROGRAMAR_HORIZONTE_ADELANTE);
-  }, [vistaTodasPlantas, centroEfectivo, semanasSingle]);
+  }, [vistaTodasPlantas, drawerCentroParaSemanas, semanasDrawerAlcance, centroEfectivo, semanasSingle]);
 
   const [semanaIdElegida, setSemanaIdElegida] = useState<string | null>(null);
   const urlSemana = searchParams.get("semana")?.trim() ?? null;
@@ -1172,7 +1204,6 @@ export function ProgramaClient() {
   const [filtroTipo, setFiltroTipo] = useState<FiltroTipo>("todos");
   const [filtroEstadoOperativo, setFiltroEstadoOperativo] = useState<FiltroEstadoOperativo>("todos");
   const [localidadTab, setLocalidadTab] = useState<string | null>(null);
-  const [drawer, setDrawer] = useState<DrawerState>(null);
 
   const semanaId = useMemo(() => {
     if (!semanasActivas.length) return "";
@@ -1453,6 +1484,25 @@ export function ProgramaClient() {
     !esCliente &&
     !vistaTodasPlantas &&
     (puede("programa:crear_ot") || puede("programa:editar"));
+  const puedeReprogramarAvisoEnDrawer = useMemo(() => {
+    if (esCliente) return false;
+    if (!puede("programa:crear_ot") && !puede("programa:editar")) return false;
+    if (!vistaTodasPlantas) return puedeMoverEnProgramaPublicado;
+    const pid = drawer?.programaDocId?.trim();
+    if (!pid) return false;
+    const c = centroDesdeProgramaDocId(pid);
+    if (!c || !isCentroInKnownList(c)) return false;
+    if (viewerSuperadmin) return true;
+    return usuarioTieneCentro(profile, c);
+  }, [
+    esCliente,
+    puede,
+    vistaTodasPlantas,
+    puedeMoverEnProgramaPublicado,
+    drawer,
+    viewerSuperadmin,
+    profile,
+  ]);
   const puedeImportarMaestroAvisos = puede("admin:cargar_programa") || puede("admin:gestionar_usuarios");
 
   useEffect(() => {
@@ -1675,7 +1725,7 @@ export function ProgramaClient() {
               {viewerEligeAlcanceMultiPlanta ? (
                 <p className="mt-1 text-xs text-muted-foreground">
                   {vistaTodasPlantas
-                    ? "Varias plantas en una sola tabla: cada fila empieza con el código de planta. Para arrastrar avisos o reprogramar desde el panel, elegí una planta sola."
+                    ? "Varias plantas en una sola tabla: cada fila empieza con el código de planta. Para arrastrar entre días, elegí una planta sola; desde el panel del aviso podés cambiar semana o día para la planta de ese aviso si tenés permiso."
                     : "Planta, semana y filtros de la grilla están en la barra de abajo."}
                 </p>
               ) : (
@@ -2335,7 +2385,7 @@ export function ProgramaClient() {
           onClose={cerrarDrawer}
           estado={drawer}
           puedeCrearOt={puedeCrearOt}
-          puedeReprogramar={puedeMoverEnProgramaPublicado}
+          puedeReprogramar={puedeReprogramarAvisoEnDrawer}
           semanasOpciones={semanasParaReprogramarDrawer}
           programaDocSeleccionActual={drawer?.programaDocId ?? semanaId}
           viewerUid={user?.uid}

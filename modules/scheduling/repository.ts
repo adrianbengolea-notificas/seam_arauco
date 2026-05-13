@@ -85,6 +85,26 @@ export async function deleteWeeklySlotAdmin(weekId: string, slotId: string): Pro
   );
 }
 
+export async function updateWeeklySlotAdmin(
+  weekId: string,
+  slotId: string,
+  patch: Partial<Pick<WeeklyScheduleSlot, "dia_semana" | "orden_en_dia" | "turno">>,
+): Promise<void> {
+  const ref = getAdminDb()
+    .collection(COLLECTIONS.weekly_schedule)
+    .doc(weekId)
+    .collection(SLOTS_SUB)
+    .doc(slotId);
+  await ref.update({
+    ...patch,
+    updated_at: FieldValue.serverTimestamp(),
+  } as Record<string, unknown>);
+  await getAdminDb().collection(COLLECTIONS.weekly_schedule).doc(weekId).set(
+    { updated_at: FieldValue.serverTimestamp() },
+    { merge: true },
+  );
+}
+
 export async function replaceWeeklyPlanRowsAdmin(
   weekId: string,
   centro: string,

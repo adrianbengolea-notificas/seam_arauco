@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  actionMoveWeekSlotToDay,
   actionRemoveWeekSlot,
   actionScheduleWorkOrderInWeek,
   actionSearchWorkOrdersForAgenda,
@@ -25,7 +26,7 @@ import { centrosEfectivosDelUsuario } from "@/modules/users/centros-usuario";
 import { getClientIdToken, useAuthUser, useUserProfile } from "@/modules/users/hooks";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, GripVertical, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 
@@ -72,6 +73,20 @@ function labelOrdenAgendaSemanal(
     return `${base} · ${nombreCentro(w.centro.trim())}`;
   }
   return base;
+}
+
+const WEEKLY_SLOT_DRAG_MIME = "application/json";
+
+function parseWeeklySlotDragPayload(raw: string): { slotId: string; fromDia: number } | null {
+  try {
+    const o = JSON.parse(raw) as { slotId?: unknown; fromDia?: unknown };
+    if (typeof o.slotId !== "string" || o.slotId.length === 0) return null;
+    const fd = Number(o.fromDia);
+    if (!Number.isInteger(fd) || fd < 1 || fd > 7) return null;
+    return { slotId: o.slotId, fromDia: fd };
+  } catch {
+    return null;
+  }
 }
 
 
@@ -142,6 +157,7 @@ export function ProgramaSemanalClient({
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [agendaBootLoading, setAgendaBootLoading] = useState(true);
+  const [dropTargetDia, setDropTargetDia] = useState<number | null>(null);
 
   const slotsByDay = useMemo(() => groupSlotsByDay(slots), [slots]);
 
@@ -260,6 +276,24 @@ export function ProgramaSemanalClient({
     try {
       const res = await actionRemoveWeekSlot(await token(), { weekId, slotId });
       setMsg(res.ok ? "Quitado del programa" : res.error.message);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onMoveSlotToDay(slotId: string, fromDia: number, destDia: 1 | 2 | 3 | 4 | 5 | 6 | 7) {
+    if (fromDia === destDia) return;
+    setMsg(null);
+    setBusy(true);
+    try {
+      const res = await actionMoveWeekSlotToDay(await token(), {
+        weekId,
+        slotId,
+        dia_semana: destDia,
+      });
+      setMsg(res.ok ? "Movido al día elegido" : res.error.message);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Error");
     } finally {
@@ -674,59 +708,140 @@ export function ProgramaSemanalClient({
         ) : slots.length === 0 ? (
           <p className="text-sm text-muted-foreground">Todavía no hay órdenes agendadas para esta semana.</p>
         ) : (
-          <div className="overflow-hidden rounded-md border">
-            <table className="w-full text-sm">
-              <thead className="border-b bg-muted/40">
-                <tr>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Día</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">
-                    Centro
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Orden</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">Ubicación · Especialidad</th>
-                  {canEdit && <th className="px-3 py-2 w-10" />}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {[1, 2, 3, 4, 5, 6, 7].flatMap((d) => {
-                  const daySlots = slotsByDay.get(d) ?? [];
-                  return daySlots.map((s, i) => (
-                    <tr key={s.id} className="hover:bg-muted/30">
-                      <td className="px-3 py-2 font-medium text-muted-foreground whitespace-nowrap">
-                        {i === 0 ? DIA_LABEL[d] : ""}
-                      </td>
-                      <td className="px-3 py-2 font-mono text-xs text-muted-foreground hidden sm:table-cell">
-                        {s.centro ? nombreCentro(s.centro) : "—"}
-                      </td>
-                      <td className="px-3 py-2">
-                        <Link href={`/tareas/${s.work_order_id}`} className="font-medium text-primary hover:underline">
-                          n.º {s.n_ot_snapshot ?? s.work_order_id.slice(0, 8)}
-                        </Link>
-                        {s.turno && <span className="ml-1.5 text-xs text-muted-foreground">turno {s.turno}</span>}
-                      </td>
-                      <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">
-                        {s.ubicacion_tecnica} · {s.especialidad}
-                      </td>
-                      {canEdit && (
-                        <td className="px-3 py-2">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
-                            aria-label="Quitar del programa"
-                            disabled={busy}
-                            onClick={() => void onRemove(s.id)}
+          <div className="space-y-2">
+            {canEdit ? (
+              <p className="text-xs text-muted-foreground">
+                Arrastrá una orden desde el ícono <GripVertical className="inline h-3.5 w-3.5 align-text-bottom opacity-70" aria-hidden /> y soltala sobre la fila de otro día (también en días sin órdenes).
+              </p>
+            ) : null}
+            <div className="overflow-hidden rounded-md border">
+              <table className="w-full text-sm">
+                <thead className="border-b bg-muted/40">
+                  <tr>
+                    {canEdit ? (
+                      <th className="w-8 px-1 py-2 text-left font-medium text-muted-foreground" aria-label="Mover" />
+                    ) : null}
+                    <th className="px-3 py-2 text-left font-medium text-muted-foreground">Día</th>
+                    <th className="px-3 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">
+                      Centro
+                    </th>
+                    <th className="px-3 py-2 text-left font-medium text-muted-foreground">Orden</th>
+                    <th className="px-3 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">
+                      Ubicación · Especialidad
+                    </th>
+                    {canEdit ? <th className="px-3 py-2 w-10" /> : null}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {[1, 2, 3, 4, 5, 6, 7].flatMap((d) => {
+                    const daySlots = slotsByDay.get(d) ?? [];
+                    const destDia = d as 1 | 2 | 3 | 4 | 5 | 6 | 7;
+                    const highlightDrop = Boolean(canEdit && dropTargetDia === d);
+                    const rowDropProps = canEdit
+                      ? {
+                          onDragOver: (e: React.DragEvent<HTMLTableRowElement>) => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = "move";
+                            setDropTargetDia(d);
+                          },
+                          onDrop: (e: React.DragEvent<HTMLTableRowElement>) => {
+                            e.preventDefault();
+                            setDropTargetDia(null);
+                            const raw = e.dataTransfer.getData(WEEKLY_SLOT_DRAG_MIME);
+                            const parsed = parseWeeklySlotDragPayload(raw);
+                            if (!parsed) return;
+                            void onMoveSlotToDay(parsed.slotId, parsed.fromDia, destDia);
+                          },
+                        }
+                      : {};
+
+                    if (daySlots.length === 0) {
+                      return [
+                        <tr
+                          key={`empty-${d}`}
+                          className={`hover:bg-muted/20${highlightDrop ? " bg-primary/10" : ""}`}
+                          {...rowDropProps}
+                        >
+                          {canEdit ? (
+                            <td className="w-8 p-1 align-middle" aria-hidden />
+                          ) : null}
+                          <td className="px-3 py-2 font-medium text-muted-foreground whitespace-nowrap">
+                            {DIA_LABEL[d]}
+                          </td>
+                          <td className="px-3 py-2 font-mono text-xs text-muted-foreground hidden sm:table-cell">
+                            —
+                          </td>
+                          <td className="px-3 py-2 text-muted-foreground italic">Sin órdenes</td>
+                          <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">—</td>
+                          {canEdit ? <td className="px-3 py-2" /> : null}
+                        </tr>,
+                      ];
+                    }
+
+                    return daySlots.map((s, i) => (
+                      <tr
+                        key={s.id}
+                        className={`hover:bg-muted/30${highlightDrop ? " bg-primary/10" : ""}`}
+                        {...rowDropProps}
+                      >
+                        {canEdit ? (
+                          <td
+                            className="w-8 cursor-grab p-1 align-middle text-muted-foreground select-none active:cursor-grabbing"
+                            title="Arrastrar a otro día"
+                            draggable={!busy}
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData(
+                                WEEKLY_SLOT_DRAG_MIME,
+                                JSON.stringify({ slotId: s.id, fromDia: d }),
+                              );
+                              e.dataTransfer.effectAllowed = "move";
+                            }}
+                            onDragEnd={() => setDropTargetDia(null)}
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                            <GripVertical className="mx-auto h-4 w-4" aria-hidden />
+                          </td>
+                        ) : null}
+                        <td className="px-3 py-2 font-medium text-muted-foreground whitespace-nowrap">
+                          {i === 0 ? DIA_LABEL[d] : ""}
                         </td>
-                      )}
-                    </tr>
-                  ));
-                })}
-              </tbody>
-            </table>
+                        <td className="px-3 py-2 font-mono text-xs text-muted-foreground hidden sm:table-cell">
+                          {s.centro ? nombreCentro(s.centro) : "—"}
+                        </td>
+                        <td className="px-3 py-2">
+                          <Link
+                            href={`/tareas/${s.work_order_id}`}
+                            className="font-medium text-primary hover:underline"
+                          >
+                            n.º {s.n_ot_snapshot ?? s.work_order_id.slice(0, 8)}
+                          </Link>
+                          {s.turno && (
+                            <span className="ml-1.5 text-xs text-muted-foreground">turno {s.turno}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">
+                          {s.ubicacion_tecnica} · {s.especialidad}
+                        </td>
+                        {canEdit ? (
+                          <td className="px-3 py-2">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+                              aria-label="Quitar del programa"
+                              disabled={busy}
+                              onClick={() => void onRemove(s.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </td>
+                        ) : null}
+                      </tr>
+                    ));
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>

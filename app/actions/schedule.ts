@@ -15,6 +15,7 @@ import { ejecutarPuentePropuestaAPrograma } from "@/modules/scheduling/programa-
 import {
   addAvisoToPublishedPrograma,
   moveAvisoInPublishedPrograma,
+  moveWeekSlotBetweenDays,
   removeWeekSlot,
   scheduleWorkOrderInWeek,
 } from "@/modules/scheduling/service";
@@ -45,6 +46,12 @@ function centrosConsultaAgenda(session: UserProfileWithUid): string[] {
 const removeSlotSchema = z.object({
   weekId: z.string().regex(/^\d{4}-W\d{2}$/),
   slotId: z.string().min(1),
+});
+
+const moveWeekSlotSchema = z.object({
+  weekId: z.string().regex(/^\d{4}-W\d{2}$/),
+  slotId: z.string().min(1),
+  dia_semana: z.number().int().min(1).max(7),
 });
 
 function wrap<T>(fn: () => Promise<T>): Promise<ActionResult<T>> {
@@ -96,6 +103,23 @@ export async function actionRemoveWeekSlot(
     await requirePermisoFromToken(idToken, "programa:crear_ot");
     const parsed = removeSlotSchema.parse(input);
     await removeWeekSlot({ weekId: parsed.weekId, slotId: parsed.slotId });
+  });
+}
+
+/** Mueve una OT agendada a otro día de la misma semana ISO (calendario + grilla publicada). */
+export async function actionMoveWeekSlotToDay(
+  idToken: string,
+  input: z.infer<typeof moveWeekSlotSchema>,
+): Promise<ActionResult<void>> {
+  return wrap(async () => {
+    const profile = await requirePermisoFromToken(idToken, "programa:crear_ot");
+    const parsed = moveWeekSlotSchema.parse(input);
+    await moveWeekSlotBetweenDays({
+      weekId: parsed.weekId,
+      slotId: parsed.slotId,
+      dia_semana: parsed.dia_semana as 1 | 2 | 3 | 4 | 5 | 6 | 7,
+      viewer: profile,
+    });
   });
 }
 

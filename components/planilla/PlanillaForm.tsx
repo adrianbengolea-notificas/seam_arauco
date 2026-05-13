@@ -176,6 +176,18 @@ export function PlanillaForm({
     };
   }, [ejecutarGuardarBorrador]);
 
+  /** Tras cada trazo válido en los pads, persistir pronto en Firestore como borrador (planilla en curso), sin esperar al debounce general. */
+  useEffect(() => {
+    if (readOnly) return;
+    const u = state.firmaUsuario;
+    const r = state.firmaResponsable;
+    if (!firmaImagenDataUrlValida(u) && !firmaImagenDataUrlValida(r)) return;
+    const tm = window.setTimeout(() => {
+      void ejecutarGuardarBorrador({ silent: true });
+    }, 450);
+    return () => clearTimeout(tm);
+  }, [state.firmaUsuario, state.firmaResponsable, readOnly, ejecutarGuardarBorrador]);
+
   const patchState = useCallback(
     (partial: Partial<PlanillaRespuesta>) => {
       setState((s) => {
@@ -249,24 +261,32 @@ export function PlanillaForm({
 
   async function onCerrarYEnviar() {
     setErrorFirma(null);
-    const v = validatePlanillaFirmable(template, state, { isAdmin });
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+      debounceTimer.current = null;
+    }
+    if (!readOnlyRef.current) {
+      try {
+        await ejecutarGuardarBorrador({ silent: true });
+      } catch (e) {
+        mostrarErrorCierre(e instanceof Error ? e.message : "No se pudo guardar la planilla");
+        return;
+      }
+    }
+    const snap = stateRef.current;
+    const v = validatePlanillaFirmable(template, snap, { isAdmin });
     if (!v.ok) {
       mostrarErrorCierre(v.mensaje);
       return;
     }
-    if (!firmaImagenDataUrlValida(state.firmaUsuario) || !firmaImagenDataUrlValida(state.firmaResponsable)) {
+    if (!firmaImagenDataUrlValida(snap.firmaUsuario) || !firmaImagenDataUrlValida(snap.firmaResponsable)) {
       mostrarErrorCierre("Faltan las firmas manuscritas (Arauco y técnico SEAM).");
       return;
     }
-    const firmaUsuario = state.firmaUsuario as string;
-    const firmaResponsable = state.firmaResponsable as string;
+    const firmaUsuario = snap.firmaUsuario as string;
+    const firmaResponsable = snap.firmaResponsable as string;
     setFirmaBusy(true);
     try {
-      if (debounceTimer.current) {
-        clearTimeout(debounceTimer.current);
-        debounceTimer.current = null;
-      }
-      await ejecutarGuardarBorrador({ silent: true });
       if (online) {
         const t = await getClientIdToken();
         if (!t) {
@@ -275,26 +295,26 @@ export function PlanillaForm({
         }
         const res = await firmarPlanilla(t, {
           otId: ot.id,
-          respuestaId: state.id,
+          respuestaId: snap.id,
           firmas: {
             firmaUsuario,
-            firmaUsuarioNombre: state.firmaUsuarioNombre ?? "",
-            firmaUsuarioLegajo: state.firmaUsuarioLegajo ?? "",
+            firmaUsuarioNombre: snap.firmaUsuarioNombre ?? "",
+            firmaUsuarioLegajo: snap.firmaUsuarioLegajo ?? "",
             firmaResponsable,
-            firmaResponsableNombre: state.firmaResponsableNombre ?? "",
+            firmaResponsableNombre: snap.firmaResponsableNombre ?? "",
           },
         });
         if (!res.ok) throw new Error(res.error.message);
       } else {
         await enqueueOutbox("planilla_firmar", {
           otId: ot.id,
-          respuestaId: state.id,
+          respuestaId: snap.id,
           firmas: {
             firmaUsuario,
-            firmaUsuarioNombre: state.firmaUsuarioNombre ?? "",
-            firmaUsuarioLegajo: state.firmaUsuarioLegajo ?? "",
+            firmaUsuarioNombre: snap.firmaUsuarioNombre ?? "",
+            firmaUsuarioLegajo: snap.firmaUsuarioLegajo ?? "",
             firmaResponsable,
-            firmaResponsableNombre: state.firmaResponsableNombre ?? "",
+            firmaResponsableNombre: snap.firmaResponsableNombre ?? "",
           },
         });
       }
@@ -474,8 +494,9 @@ export function PlanillaForm({
               <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Cerrar y enviar</p>
               <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
                 No hace falta terminar todo de una: podés volver atrás sin firmar y seguir otro día; lo cargado queda
-                guardado. Si falta un dato obligatorio o una firma, te lo mostramos al tocar el botón. Si todo está bien,
-                se cierra la orden.
+                guardado. Al terminar cada firma en pantalla se guarda en segundos como planilla en curso (borrador). Si
+                falta un dato obligatorio o una firma, te lo mostramos al tocar el botón. Si todo está bien, se cierra la
+                orden.
               </p>
               {template.id === "GG" ? (
                 <p className="text-xs text-zinc-700 dark:text-zinc-300">

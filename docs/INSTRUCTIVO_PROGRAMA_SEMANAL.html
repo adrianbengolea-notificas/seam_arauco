@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Instructivo · Organización de la semana de trabajo · CMMS SEAM</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    --bg: #f7f8fb;
+    --panel: #ffffff;
+    --text: #1f2430;
+    --muted: #5b6478;
+    --brand: #0e6b6b;
+    --brand-2: #21a98d;
+    --brand-soft: #e8f5f2;
+    --accent: #2563eb;
+    --warn-bg: #fff7ed; --warn-bd: #f59e0b; --warn-tx: #7c2d12;
+    --info-bg: #eff6ff; --info-bd: #2563eb; --info-tx: #1e3a8a;
+    --ok-bg:   #ecfdf5; --ok-bd:   #059669; --ok-tx:   #064e3b;
+    --danger-bg:#fef2f2;--danger-bd:#dc2626;--danger-tx:#7f1d1d;
+    --code-bg: #0f172a; --code-tx: #e2e8f0;
+    --border: #e3e6ee;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  a { color: var(--brand); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; font-size: 0.92em;
+    background: #eef1f6; padding: 1px 5px; border-radius: 4px; color: #0f172a; }
+  pre { background: var(--code-bg); color: var(--code-tx); padding: 14px 16px; border-radius: 10px;
+    overflow-x: auto; font-size: 12.5px; line-height: 1.55; }
+  pre code { background: transparent; color: inherit; padding: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; font-size: 14px; }
+  th, td { padding: 9px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+  th { background: #f0f2f8; font-weight: 600; color: #0f172a; }
+  tr:last-child td { border-bottom: none; }
+
+  /* Layout */
+  .shell { display: grid; grid-template-columns: 280px 1fr; max-width: 1280px; margin: 0 auto; gap: 0; }
+  .sidebar { position: sticky; top: 0; align-self: start; height: 100vh; overflow: auto;
+    background: var(--panel); border-right: 1px solid var(--border); padding: 22px 18px; }
+  .sidebar h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--muted); margin: 12px 0 8px; }
+  .sidebar ol { list-style: none; padding: 0; margin: 0; counter-reset: toc; }
+  .sidebar ol li { counter-increment: toc; margin: 2px 0; }
+  .sidebar ol li a { display: block; padding: 6px 10px; border-radius: 6px; color: #2b3344; font-size: 13.5px; }
+  .sidebar ol li a::before { content: counter(toc) ". "; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .sidebar ol li a:hover { background: var(--brand-soft); color: var(--brand); text-decoration: none; }
+
+  .main { padding: 0 38px 80px; max-width: 980px; }
+
+  /* Hero */
+  .hero { background: linear-gradient(135deg, #0e6b6b 0%, #21a98d 100%); color: #fff;
+    border-radius: 0 0 18px 18px; padding: 38px 38px 34px; margin: 0 -38px 28px; }
+  .hero .eyebrow { font-size: 12px; letter-spacing: 2px; text-transform: uppercase; opacity: .85; }
+  .hero h1 { margin: 8px 0 6px; font-size: 30px; line-height: 1.2; font-weight: 700; }
+  .hero p { margin: 0; opacity: .92; font-size: 15px; max-width: 720px; }
+  .hero .meta { margin-top: 14px; display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; opacity: .9; }
+  .hero .meta span { background: rgba(255,255,255,.14); padding: 4px 10px; border-radius: 999px; }
+
+  h2.section { font-size: 22px; margin: 36px 0 12px; padding-top: 14px; border-top: 1px solid var(--border); }
+  h2.section .num { color: var(--brand-2); font-weight: 700; margin-right: 8px; }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  h4 { font-size: 14.5px; margin: 16px 0 6px; color: #0f172a; }
+  p { margin: 8px 0; }
+
+  /* Callouts */
+  .callout { border-left: 4px solid; padding: 12px 14px; border-radius: 8px; margin: 14px 0; }
+  .callout .title { font-weight: 700; margin-bottom: 4px; }
+  .callout.info   { background: var(--info-bg);   border-color: var(--info-bd);   color: var(--info-tx); }
+  .callout.warn   { background: var(--warn-bg);   border-color: var(--warn-bd);   color: var(--warn-tx); }
+  .callout.ok     { background: var(--ok-bg);     border-color: var(--ok-bd);     color: var(--ok-tx); }
+  .callout.danger { background: var(--danger-bg); border-color: var(--danger-bd); color: var(--danger-tx); }
+
+  /* Cards / two-col grid */
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .card .label { font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); }
+  .card h4 { margin: 4px 0 6px; }
+
+  /* Badges */
+  .badge { display: inline-block; font-size: 11.5px; padding: 2px 8px; border-radius: 999px; font-weight: 600; vertical-align: middle; }
+  .b-p1 { background: #fee2e2; color: #991b1b; }
+  .b-p2 { background: #fef3c7; color: #92400e; }
+  .b-p3 { background: #e0e7ff; color: #3730a3; }
+  .b-plan { background: #dcfce7; color: #166534; }
+  .b-urg  { background: #fee2e2; color: #991b1b; }
+  .b-corr { background: #fde68a; color: #78350f; }
+
+  /* Print */
+  @media print {
+    @page { size: A4; margin: 14mm 14mm 16mm; }
+    body { background: #fff; }
+    .shell { display: block; max-width: none; }
+    .sidebar { display: none; }
+    .main { padding: 0; max-width: none; }
+    .hero { border-radius: 0; margin: 0 0 18px; padding: 22px 0; }
+    .no-print { display: none !important; }
+    h2.section, h3, h4 { break-after: avoid-page; }
+    pre, table, .callout, .card { break-inside: avoid-page; }
+    a { color: var(--brand); }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+
+  .print-tip { background: #fff; border: 1px dashed var(--border); border-radius: 10px;
+    padding: 10px 14px; margin: 14px 0 22px; font-size: 13px; color: var(--muted); }
+  .kbd { font-family: ui-monospace, monospace; background: #f3f4f6; border: 1px solid #d1d5db;
+    border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px; font-size: 12px; color: #111827; }
+
+  .flow { background: #0f172a; color: #cbd5e1; border-radius: 10px; padding: 16px 18px;
+    font-family: ui-monospace, monospace; font-size: 12.5px; line-height: 1.6; white-space: pre; overflow-x: auto; }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <nav class="sidebar no-print" aria-label="Índice">
+    <h2>Índice</h2>
+    <ol>
+      <li><a href="#s1">Resumen en 1 minuto</a></li>
+      <li><a href="#s2">Cronograma diario en producción</a></li>
+      <li><a href="#s3">Vía motor: paso a paso</a></li>
+      <li><a href="#s4">Qué tareas elige y cómo las acomoda</a></li>
+      <li><a href="#s5">Aprobación humana</a></li>
+      <li><a href="#s6">Idempotencia y merge</a></li>
+      <li><a href="#s7">Vía manual</a></li>
+      <li><a href="#s8">Las dos vías juntas (diagrama)</a></li>
+      <li><a href="#s9">Checklist semanal del superadmin</a></li>
+      <li><a href="#s10">Archivos clave del código</a></li>
+    </ol>
+    <h2 style="margin-top:22px">Glosario rápido</h2>
+    <p style="font-size:12.5px;color:var(--muted);margin:0">
+      <b>Propuesta semanal</b>: borrador que arma el motor.<br>
+      <b>Programa semanal</b>: lo aprobado y publicado.<br>
+      <b>Plan de mantenimiento</b>: aviso preventivo con frecuencia.<br>
+      <b>OT</b>: Orden de Trabajo (la ejecución real).<br>
+      <b>Semana ISO</b>: <code>YYYY-Www</code> (ej. 2026-W20).
+    </p>
+  </nav>
+
+  <main class="main">
+
+    <header class="hero">
+      <div class="eyebrow">CMMS Industrial SEAM · Manual operativo</div>
+      <h1>Cómo se organiza la semana de trabajo</h1>
+      <p>Vía manual y vía motor — instructivo para superadmin. Cada paso del flujo está mapeado al archivo de código que lo implementa, para diagnosticar rápido cuando algo no calza.</p>
+      <div class="meta">
+        <span>Versión Mayo 2026</span>
+        <span>Audiencia: Superadmin · Admin · Supervisor</span>
+        <span>Stack: Next.js + Firebase Cloud Functions (gen 2)</span>
+      </div>
+    </header>
+
+    <div class="print-tip no-print">
+      Para guardar este instructivo como PDF: presioná <span class="kbd">Ctrl</span>+<span class="kbd">P</span>
+      (o <span class="kbd">⌘</span>+<span class="kbd">P</span> en Mac) →
+      <b>Destino: Guardar como PDF</b> → <b>Más opciones → Gráficos de fondo: activado</b>.
+      Los enlaces del índice quedan clickeables en el PDF y los títulos aparecen como marcadores en el panel lateral del lector.
+    </div>
+
+    <!-- ====================================== -->
+    <h2 class="section" id="s1"><span class="num">1.</span>Resumen en 1 minuto</h2>
+    <p>Hay <b>dos vías</b> que conviven y se complementan:</p>
+    <div class="cards">
+      <div class="card">
+        <div class="label">Automática</div>
+        <h4>Vía motor</h4>
+        <p>Un cron diario propone la semana. Lo único que <b>no</b> hace es publicar: siempre necesita aprobación humana.</p>
+      </div>
+      <div class="card">
+        <div class="label">Operador</div>
+        <h4>Vía manual</h4>
+        <p>El supervisor / superadmin asigna planes al calendario anual, crea OTs sueltas y edita el programa semanal publicado.</p>
+      </div>
+    </div>
+    <div class="callout info">
+      <div class="title">Idea clave</div>
+      La propuesta semanal que finalmente se ejecuta es <b>siempre</b> resultado de las dos vías mezcladas: el motor lee lo que el humano cargó manualmente, y el humano corrige lo que el motor propone.
+    </div>
+
+    <!-- ====================================== -->
+    <h2 class="section" id="s2"><span class="num">2.</span>Cronograma diario en producción</h2>
+    <p>Los dos jobs corren en <b>Cloud Functions (Firebase)</b>, no en Vercel. Están definidos en <code>functions/src/index.ts</code>, en zona horaria <code>America/Argentina/Buenos_Aires</code>.</p>
+    <table>
+      <thead><tr><th>Hora ART</th><th>Job</th><th>Endpoint que invoca</th><th>Qué hace</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>05:05</b></td>
+          <td><code>scheduledActualizarVencimientos</code></td>
+          <td><code>GET /api/cron/actualizar-vencimientos</code></td>
+          <td>Recalcula <code>dias_para_vencimiento</code> y <code>estado_vencimiento</code> en <b>todos los avisos</b> y notifica vencidos S/A.</td>
+        </tr>
+        <tr>
+          <td><b>06:00</b></td>
+          <td><code>scheduledMotorOtDiario</code></td>
+          <td><code>GET /api/cron/motor-ot-diario</code></td>
+          <td>Genera / actualiza la <b>propuesta semanal</b> por centro y notifica a supervisores.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>Las dos rutas exigen header <code>Authorization: Bearer &lt;CRON_SECRET&gt;</code>. Cualquier disparo manual (curl, Postman, scheduler externo) tiene que usar ese mismo secreto.</p>
+    <div class="callout warn">
+      <div class="title">El orden importa</div>
+      Primero <b>actualizar-vencimientos</b> (deja los planes con <code>dias_para_vencer</code> y <code>estado_vencimiento</code> frescos) y después <b>motor-ot-diario</b> (lee esos campos para decidir urgencias).
+    </div>
+
+    <!-- ====================================== -->
+    <h2 class="section" id="s3"><span class="num">3.</span>Vía motor: qué hace, paso a paso</h2>
+    <p>Núcleo: <code>lib/motor/motor-ot-diario.ts → runMotorOtDiario()</code>. Por cada <b>centro</b> de <code>KNOWN_CENTROS</code> el motor hace, en este orden:</p>
+    <ol>
+      <li>
+        <b>Idempotencia 23 h.</b> Si ya completó una corrida exitosa para esa semana ISO en las últimas 23 h, devuelve <code>skipped: idempotencia_23h</code> y no toca nada.
+        <br>Se puede saltear con <code>bypassIdempotencia: true</code> (solo en disparos manuales). Lock en <code>motor_ot_diario_runs/&lt;semanaId&gt;</code>.
+      </li>
+      <li><b><code>ensurePlansForCentro(centro)</code>:</b> garantiza que cada aviso preventivo del centro tenga un documento en <code>planes_mantenimiento</code> (si falta, lo crea).</li>
+      <li>
+        <b>Lectura en paralelo:</b>
+        <ul>
+          <li>Planes de mantenimiento del centro.</li>
+          <li><code>centros/&lt;centro&gt;</code> para sacar <code>config_motor</code> (cupos, días hábiles, agrupar por localidad).</li>
+          <li>OTs abiertas del centro (top 200 más recientes; se filtran correctivos en estado ABIERTA / EN_EJECUCION).</li>
+          <li>Técnicos activos del centro, con sus especialidades.</li>
+        </ul>
+      </li>
+      <li><b><code>buildPropuestaGreedyMotor</code></b> (<code>lib/scheduling/motor-greedy.ts</code>): arma una propuesta determinística (sin IA). Es la parte importante; detallada en §4.</li>
+      <li><b><code>refinarPropuestaOtsConIa</code>:</b> pasada opcional con IA para reordenar / ajustar ítems. Si falla, cae con gracia a la propuesta greedy (queda anotada la advertencia <i>"Refinamiento IA no disponible"</i>).</li>
+      <li>
+        <b>Persistencia y notificación</b> en <code>propuestas_semana/&lt;centro&gt;__&lt;semanaId&gt;</code>:
+        <ul>
+          <li>Si <b>no existe</b>: la crea en estado <code>pendiente_aprobacion</code> y dispara notificación <code>propuesta_disponible</code> a supervisores + admin del centro.</li>
+          <li>Si <b>existe</b> y ya está aprobada/cancelada: no hace nada (respeta el trabajo humano).</li>
+          <li>Si <b>existe en <code>pendiente_aprobacion</code></b> con ítems ya aprobados/rechazados: hace <b>merge inteligente</b> (§6).</li>
+        </ul>
+      </li>
+    </ol>
+    <div class="callout danger">
+      <div class="title">El motor no crea OTs</div>
+      Solo escribe la propuesta. Las OTs se materializan recién cuando el supervisor aprueba (§5).
+    </div>
+
+    <!-- ====================================== -->
+    <h2 class="section" id="s4"><span class="num">4.</span>Qué tareas elige el motor y cómo las acomoda</h2>
+    <p>El greedy usa cuatro reglas: <b>pool</b>, <b>prioridad</b>, <b>día</b>, <b>cupo</b>.</p>
+
+    <h3>4.1 Pool: quién es candidato a entrar</h3>
+    <p>Un plan entra en el pool si <b>todo</b> esto se cumple:</p>
+    <ul>
+      <li><code>activo !== false</code>.</li>
+      <li>No tiene <code>incluido_en_ot_pendiente</code> (no hay ya una OT en curso para él).</li>
+      <li>Tiene <code>asset_id</code>.</li>
+      <li>Y al menos <b>uno</b> de estos cuatro motivos:</li>
+    </ul>
+    <table>
+      <thead><tr><th style="width:60px">Caso</th><th>Condición</th><th>Origen UI</th></tr></thead>
+      <tbody>
+        <tr><td><b>A</b></td><td><code>semana_asignada === semana del motor</code></td><td><span class="badge b-plan">Planificado</span> "Planificado por supervisor para esta semana"</td></tr>
+        <tr><td><b>B</b></td><td><code>estado_vencimiento === "vencido"</code></td><td><span class="badge b-urg">Urgencia</span> "Aviso vencido — atención inmediata"</td></tr>
+        <tr><td><b>C</b></td><td><code>nivel_riesgo_equipo === "critico"</code> y sin <code>semana_asignada</code></td><td><span class="badge b-urg">Urgencia</span> "Equipo crítico sin semana asignada"</td></tr>
+        <tr><td><b>D</b></td><td><code>dias_para_vencer ≤ 7</code> y sin <code>semana_asignada</code></td><td><span class="badge b-urg">Urgencia</span> "Vence en N días — sin semana asignada"</td></tr>
+      </tbody>
+    </table>
+    <div class="callout info">
+      <div class="title">Regla anti-robo</div>
+      Si un plan tiene <code>semana_asignada</code> distinta a la del motor <b>y no está vencido</b>, se <b>excluye</b> (el supervisor ya decidió que va otra semana). Esto evita que el motor "robe" planes a otra semana.
+    </div>
+
+    <h3>4.2 Prioridad del ítem</h3>
+    <table>
+      <thead><tr><th style="width:80px">Prioridad</th><th>Cuándo</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge b-p1">P1</span></td><td>Vencido o equipo crítico</td></tr>
+        <tr><td><span class="badge b-p2">P2</span></td><td>Nunca ejecutado, o vence en ≤ 7 días</td></tr>
+        <tr><td><span class="badge b-p3">P3</span></td><td>Vence en ≤ 30 días</td></tr>
+        <tr><td><span class="badge b-p3">P3</span></td><td>(Interno P4) → todo lo demás se baja a P3 al persistir</td></tr>
+      </tbody>
+    </table>
+    <p>Si el plan ya viene "planificado" por el calendario anual y tiene <code>prioridad_motor</code> (1/2/3) cargada por el supervisor, <b>gana</b> la del supervisor.</p>
+
+    <h3>4.3 Día de la semana</h3>
+    <ul>
+      <li>Se ordena por <b>urgencia</b> primero: vencido &gt; crítico sin semana &gt; vence ≤7 días sin semana &gt; planificado.</li>
+      <li>Para <span class="badge b-p1">P1</span>, <b>lunes y martes primero</b>, después el resto de los días hábiles del centro.</li>
+      <li>Si <code>config_motor.agrupar_por_localidad</code> está activo, dentro del mismo día prioriza los días donde ya hay carga de la misma localidad + especialidad (para concentrar viajes).</li>
+    </ul>
+
+    <h3>4.4 Cupo por día y especialidad</h3>
+    <p><code>config_motor</code> define máximos diarios separados:</p>
+    <table>
+      <tbody>
+        <tr><td><code>max_ots_por_dia_aire</code></td><td>AA</td></tr>
+        <tr><td><code>max_ots_por_dia_electrico</code></td><td>ELÉCTRICO y HG</td></tr>
+        <tr><td><code>max_ots_por_dia_gg</code></td><td>GG</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn">
+      <div class="title">Señal típica de falta de capacidad</div>
+      Si en las advertencias aparece <i>"Vencido #N no entró por cupo diario"</i> repetidamente, hay que ampliar capacidad: subir los máximos o repartir vencidos en más semanas.
+    </div>
+
+    <h3>4.5 Correctivos abiertos</h3>
+    <p>Si <code>config_motor.incluir_correctivos_en_propuesta === true</code>, los <span class="badge b-corr">Correctivos</span> abiertos se cargan a <b>lunes/martes</b>, round-robin. No respetan el cupo (por eso aparece advertencia: "revisar cupo real").</p>
+
+    <h3>4.6 Técnico sugerido</h3>
+    <p>Por especialidad, elige el primer técnico activo cuyo <code>especialidades</code> incluya la del ítem. Es solo sugerencia; el supervisor puede reasignar.</p>
+
+    <!-- ====================================== -->
+    <h2 class="section" id="s5"><span class="num">5.</span>Aprobación humana (paso obligatorio)</h2>
+    <p><b>UI:</b> <code>/programa/aprobacion</code> · <b>Action:</b> <code>actionAprobarItemsPropuestaMotor</code></p>
+    <ol>
+      <li>El supervisor abre la propuesta de la semana / centro.</li>
+      <li>Marca los ítems que quiere aprobar (por uno, por lote, o "aprobar todos los planificados").</li>
+      <li>
+        Al confirmar:
+        <ul>
+          <li>Se marca cada ítem como <code>status: "aprobada"</code> en la propuesta (transacción).</li>
+          <li>Se ejecuta <b><code>ejecutarPuentePropuestaAPrograma</code></b>, que es lo que de verdad <b>publica el programa</b>:
+            <ul>
+              <li>Sincroniza <code>programa_semanal/&lt;centro&gt;__&lt;semanaId&gt;__&lt;dia&gt;__&lt;localidad&gt;</code>.</li>
+              <li><b>Genera las OTs</b> correspondientes (idempotente: si la OT ya existe, la actualiza en lugar de duplicar).</li>
+              <li>Registra <code>historial_eventos</code> y <code>aprendizaje</code> (para alimentar al motor con preferencias futuras).</li>
+            </ul>
+          </li>
+        </ul>
+      </li>
+      <li>Cuando <b>todos</b> los ítems quedan aprobados/rechazados, la propuesta pasa a <code>status: "aprobada"</code>. Hasta entonces se mantiene en <code>pendiente_aprobacion</code> y el motor puede seguir agregando ítems nuevos en sus corridas siguientes.</li>
+    </ol>
+    <p>Acciones inversas: <code>actionRechazarItemPropuestaMotor</code> / <code>actionRechazarItemsPropuestaMotor</code> marcan ítems como <code>rechazada</code> (no se crean OTs).</p>
+    <div class="callout danger">
+      <div class="title">Sin aprobación, no hay programa</div>
+      Si nunca se aprueba la propuesta, <b>no hay programa publicado</b> ni OTs creadas, aunque el motor haya corrido bien. Esto es por diseño: el motor propone, el humano dispone.
+    </div>
+
+    <!-- ====================================== -->
+    <h2 class="section" id="s6"><span class="num">6.</span>Idempotencia y merge inteligente</h2>
+    <p>Caso típico: el motor corrió el lunes, el supervisor aprobó la mitad, y el martes vuelve a correr el motor (o el superadmin lo dispara a mano con <code>bypassIdempotencia</code>).</p>
+    <ul>
+      <li>Si la propuesta existente <b>no</b> está en <code>pendiente_aprobacion</code> (ya está <code>aprobada</code> o <code>cancelada</code>): el motor <b>no la toca</b>.</li>
+      <li>
+        Si está <code>pendiente_aprobacion</code>:
+        <ul>
+          <li>Ítems ya aprobados o rechazados por el supervisor: se <b>preservan intactos</b>.</li>
+          <li>Ítems nuevos que aparecen en la corrida del motor: se agregan, <b>salvo</b> que choquen con un <code>plan_id</code> o <code>work_order_id</code> ya finalizado en la propuesta (en cuyo caso se descartan, para no duplicar).</li>
+          <li>Si <code>CRON_NOTIFY_PROPUESTA_MERGE_NUEVOS=1</code> está activo, manda otra notificación <i>"Propuesta actualizada · N ítems nuevos"</i>.</li>
+        </ul>
+      </li>
+    </ul>
+    <p><b>Lock de 23 h:</b> si no se hace bypass, la idempotencia evita doble notificación si alguien le pega dos veces al cron en el mismo día.</p>
+
+    <!-- ====================================== -->
+    <h2 class="section" id="s7"><span class="num">7.</span>Vía manual</h2>
+
+    <h3>7.1 Asignar planes al calendario anual (lo que alimenta al motor)</h3>
+    <p><b>UI:</b> <code>/programa/preventivos</code> (pestaña Calendario anual).</p>
+    <p>El supervisor / superadmin marca, sobre un plan preventivo, la <b>semana ISO <code>YYYY-Www</code></b> en <code>semana_asignada</code> (y opcionalmente <code>prioridad_motor: 1|2|3</code>).</p>
+    <ul>
+      <li>Cuando llegue la corrida de <b>esa</b> semana, el plan entra como <code>origen: "planificado"</code> (caso A del pool §4.1).</li>
+      <li>En semanas distintas, el plan está <b>excluido</b> del pool a menos que se venza.</li>
+    </ul>
+    <div class="callout info">
+      <div class="title">Implicación clave</div>
+      Si una semana llega vacía o con muy pocos ítems, en general es porque <b>nadie cargó planes en el calendario anual</b> para esa semana, no porque el motor "no encuentre nada". El motor solo propone urgencias; el resto del trabajo planificado depende del calendario anual cargado por humano.
+    </div>
+
+    <h3>7.2 Vencimientos S/A — crear OT o agregar al programa desde un aviso</h3>
+    <p><b>UI:</b> <code>/programa/preventivos</code> (pestaña Vencimientos).</p>
+    <ul>
+      <li><b>Crear OT</b>: arma la OT vinculada al aviso (pre-completada). Existe como entidad <b>sin pasar por el motor ni por la propuesta</b>.</li>
+      <li><b>Agregar al programa</b>: lo carga directo a <code>programa_semanal</code> (centro / semana ISO / día / localidad) saltando la propuesta. Útil para corregir omisiones en caliente.</li>
+    </ul>
+
+    <h3>7.3 Crear OT manual (sin aviso)</h3>
+    <p><b>UI:</b> Tareas → Nueva OT. Permite levantar correctivos o checklist no asociados a un aviso. Quedan visibles para el motor en la próxima corrida (como correctivos abiertos, si <code>incluir_correctivos_en_propuesta</code> está activo).</p>
+
+    <h3>7.4 Editar el programa publicado</h3>
+    <table>
+      <thead><tr><th>Server action</th><th>Qué hace</th></tr></thead>
+      <tbody>
+        <tr><td><code>actionScheduleWorkOrderInWeek</code></td><td>Agrega una OT a un slot semanal</td></tr>
+        <tr><td><code>actionRemoveWeekSlot</code></td><td>Saca una OT de un slot</td></tr>
+        <tr><td><code>actionAddAvisoToProgramaPublicado</code></td><td>Empuja un aviso suelto a la grilla publicada</td></tr>
+        <tr><td><code>actionMoveAvisoEnProgramaPublicado</code></td><td>Mueve un aviso a otro día / semana</td></tr>
+      </tbody>
+    </table>
+    <p>Todas requieren permiso <code>programa:crear_ot</code> (supervisor o superior) y validan que el usuario tenga el centro asignado (excepto superadmin, que tiene acceso global).</p>
+
+    <!-- ====================================== -->
+    <h2 class="section" id="s8"><span class="num">8.</span>Cómo se ven las dos vías juntas</h2>
+<div class="flow">Domingo                 Lunes                  Lunes 05:05            Lunes 06:00
+──────────────────────  ─────────────────────  ─────────────────────  ─────────────────────
+Supervisor carga        Supervisor crea OT     CRON                   CRON
+"semana_asignada"       manual urgente         actualizar-vencimientos  motor-ot-diario
+en planes_mantenimiento (queda en correctivos  recalcula              lee planes + correctivos
+para esta semana ISO     abiertos del centro)  estado_vencimiento     + config_motor
+                                               de todos los avisos    arma propuesta semanal
+                                                                      (planificados + urgencias
+                                                                      + correctivos lun/mar)
+                                                                      escribe propuestas_semana
+                                                                      y notifica supervisores
+
+                        Martes / Miércoles
+                        ─────────────────────
+                        Supervisor entra a /programa/aprobacion
+                        revisa ítems planificados + urgencias propuestas
+                        aprueba / rechaza / edita
+                        → ejecutarPuentePropuestaAPrograma:
+                             crea/actualiza OTs
+                             publica programa_semanal
+                             registra aprendizaje</div>
+
+    <!-- ====================================== -->
+    <h2 class="section" id="s9"><span class="num">9.</span>Checklist semanal del superadmin</h2>
+    <ol>
+      <li>
+        <b>Lunes mañana:</b>
+        <ul>
+          <li><code>propuestas_semana/&lt;centro&gt;__&lt;semanaActual&gt;</code> debe existir y tener <code>status: "pendiente_aprobacion"</code>. Si no, revisar logs del cron en Functions (<code>scheduledMotorOtDiario</code>).</li>
+          <li>Mirar <code>advertencias</code> de la propuesta: si dice <i>"No hay urgencias ni planes asignados a esta semana"</i>, es señal de calendario anual vacío.</li>
+        </ul>
+      </li>
+      <li><b>Cupos:</b> si aparece <i>"Vencido #N no entró por cupo diario"</i> repetidamente → ajustar <code>config_motor.max_ots_por_dia_*</code> del centro o repartir vencidos en más semanas.</li>
+      <li><b>Idempotencia:</b> si se cambió algo y querés que el motor vuelva a correr ese mismo día, invocá manualmente <code>GET /api/cron/motor-ot-diario</code> con <code>MOTOR_OT_SKIP_IDEMPOTENCY=1</code> (o <code>bypassIdempotencia: true</code> si lo llamás desde una action). Si no, el lock de 23 h te bloquea.</li>
+      <li><b>Aprobación:</b> una propuesta sin aprobar = sin OTs creadas. Si pasaron varios días en <code>pendiente_aprobacion</code>, contactar al supervisor del centro.</li>
+      <li><b>Manual vs motor:</b> para que el motor "respete" trabajo que ya hay → debe estar como <b>OT abierta</b> (no solo como nota) o <b>plan con <code>incluido_en_ot_pendiente</code></b>. Si no, el motor lo va a volver a proponer.</li>
+      <li>
+        <b>Notificaciones:</b>
+        <ul>
+          <li><code>propuesta_disponible</code>: automática a supervisor + admin del centro.</li>
+          <li><code>ot_vencida</code>: desde <code>actualizar-vencimientos</code> cuando un aviso S/A pasa a <code>vencido</code> por primera vez.</li>
+        </ul>
+      </li>
+    </ol>
+
+    <!-- ====================================== -->
+    <h2 class="section" id="s10"><span class="num">10.</span>Archivos clave del código</h2>
+
+    <h3>Cron HTTP (Next)</h3>
+<pre><code>app/api/cron/motor-ot-diario/route.ts
+app/api/cron/actualizar-vencimientos/route.ts</code></pre>
+
+    <h3>Núcleo del motor</h3>
+<pre><code>lib/motor/motor-ot-diario.ts        // orquesta corrida, lock, merge, notificaciones
+lib/scheduling/motor-greedy.ts      // pool, prioridad, día, cupo
+lib/motor/advertencias-merge.ts     // acotado de advertencias acumuladas</code></pre>
+
+    <h3>Aprobación y publicación</h3>
+<pre><code>app/(dashboard)/programa/aprobacion/aprobacion-client.tsx
+app/actions/schedule.ts             // actionAprobarItemsPropuestaMotor, actionRechazar*,
+                                    // actionAddAvisoToProgramaPublicado,
+                                    // actionMoveAvisoEnProgramaPublicado</code></pre>
+
+    <h3>Calendario anual y vencimientos</h3>
+<pre><code>app/(dashboard)/programa/preventivos/preventivos-hub-client.tsx
+app/(dashboard)/programa/vencimientos/vencimientos-client.tsx</code></pre>
+
+    <h3>Scheduler de producción (Firebase)</h3>
+<pre><code>functions/src/index.ts              // scheduledActualizarVencimientos
+                                    // scheduledMotorOtDiario</code></pre>
+
+    <hr style="margin: 40px 0 20px; border: none; border-top: 1px solid var(--border)">
+    <p style="text-align:center; color: var(--muted); font-size: 12.5px">
+      CMMS Industrial SEAM · Instructivo operativo · Mayo 2026
+    </p>
+
+  </main>
+</div>
+
+<script>
+  // Click en el índice → resaltado breve del título destino (mejor pista visual)
+  document.querySelectorAll('.sidebar a[href^="#"]').forEach(a => {
+    a.addEventListener('click', () => {
+      const id = a.getAttribute('href').slice(1);
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.animate(
+        [{ background: 'rgba(33,169,141,.22)' }, { background: 'transparent' }],
+        { duration: 1100, easing: 'ease-out' }
+      );
+    });
+  });
+</script>
+</body>
+</html>

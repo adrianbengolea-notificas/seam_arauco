@@ -15,6 +15,7 @@ import {
   getWeeklySlotAdmin,
   moveAvisoEnProgramaPublicadoTxn,
   removeAvisoFromProgramaSemanaAdmin,
+  updateWeeklySlotAdmin,
   replaceWeeklyPlanRowsAdmin,
   updateWeeklyPlanRowAdmin,
 } from "@/modules/scheduling/repository";
@@ -170,6 +171,66 @@ export async function removeWeekSlot(input: { weekId: string; slotId: string }):
     avisoNumero: numero,
   });
   await deleteWeeklySlotAdmin(input.weekId, input.slotId);
+}
+
+/**
+ * Cambia el día ISO de una OT agendada y sincroniza la celda en `programa_semanal`
+ * (misma semana y documento que al agendar manualmente).
+ */
+export async function moveWeekSlotBetweenDays(input: {
+  weekId: string;
+  slotId: string;
+  dia_semana: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  viewer: UserProfileWithUid;
+}): Promise<void> {
+  const slot = await getWeeklySlotAdmin(input.weekId, input.slotId);
+  if (!slot) {
+    throw new AppError("NOT_FOUND", "Entrada no encontrada");
+  }
+  const rol = toPermisoRol(input.viewer.rol);
+  const cOt = String(slot.centro ?? "").trim();
+  if (!cOt) {
+    throw new AppError("VALIDATION", "La entrada no tiene centro definido");
+  }
+  if (rol !== "superadmin" && !usuarioTieneCentro(input.viewer, cOt)) {
+    throw new AppError("FORBIDDEN", "No podés mover esta entrada");
+  }
+  if (slot.dia_semana === input.dia_semana) {
+    return;
+  }
+
+  const oldDia = slot.dia_semana;
+  const oldOrden = slot.orden_en_dia;
+  const newOrden = await nextOrdenEnDia(input.weekId, input.dia_semana);
+  const programaDocId = propuestaSemanaDocId(cOt, input.weekId);
+  const loc = (slot.ubicacion_tecnica ?? "").trim() || "—";
+  const espProg = especialidadAAvisoToPrograma(slot.especialidad);
+  const avisoNumero = numeroOtEnProgramaPublicado(slot.n_ot_snapshot, slot.work_order_id);
+  const fromDia = diaIsoSemanaADiaPrograma(oldDia);
+  const destDia = diaIsoSemanaADiaPrograma(input.dia_semana);
+
+  await updateWeeklySlotAdmin(input.weekId, input.slotId, {
+    dia_semana: input.dia_semana,
+    orden_en_dia: newOrden,
+  });
+  try {
+    await moveAvisoEnProgramaPublicadoTxn({
+      sourceProgramaDocId: programaDocId,
+      destProgramaDocId: programaDocId,
+      destSemanaIso: input.weekId.trim(),
+      centro: cOt,
+      avisoNumero,
+      avisoFirestoreId: undefined,
+      from: { localidad: loc, dia: fromDia, especialidad: espProg },
+      destDia,
+    });
+  } catch (e) {
+    await updateWeeklySlotAdmin(input.weekId, input.slotId, {
+      dia_semana: oldDia,
+      orden_en_dia: oldOrden,
+    });
+    throw e;
+  }
 }
 
 export async function replaceWeeklyPlanRows(input: {

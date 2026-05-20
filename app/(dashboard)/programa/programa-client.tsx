@@ -56,7 +56,7 @@ import { tienePermiso, type Rol } from "@/lib/permisos";
 import { usePermisos } from "@/lib/permisos/usePermisos";
 import { getClientIdToken, useAuth } from "@/modules/users/hooks";
 import { exportarProgramaSemanalExcel } from "@/lib/export/programa-semanal-excel";
-import { GripVertical, Trash2, X } from "lucide-react";
+import { Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -602,7 +602,7 @@ function encuentraSlotParaChip(
   );
 }
 
-/** Chip del aviso + asa lateral para arrastrar a otro día (misma fila / misma semana). */
+/** Chip del aviso; si `puedeArrastrar`, se arrastra entero a otro día (misma fila / misma semana). */
 function ProgramaChipAvisoConArrastre({
   programaDocId,
   loc,
@@ -630,6 +630,8 @@ function ProgramaChipAvisoConArrastre({
   onDragPayloadStart?: (payload: ProgramaAvisoDragPayload) => void;
   onDragPayloadEnd?: () => void;
 }) {
+  const omitirClickTrasArrastre = useRef(false);
+
   const dragPayload = puedeArrastrar
     ? ({
         v: 1 as const,
@@ -642,54 +644,60 @@ function ProgramaChipAvisoConArrastre({
       } satisfies ProgramaAvisoDragPayload)
     : null;
 
+  const tituloChip =
+    c.aviso.ordenPreviaPendiente
+      ? `Aviso ${c.aviso.numero} — orden previa pendiente de cierre`
+      : `Aviso ${c.aviso.numero}`;
+
   return (
-    <div className="flex items-start gap-0.5">
-      {dragPayload ? (
-        <button
-          type="button"
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData(MIME_PROGRAMA_AVISO_DRAG, JSON.stringify(dragPayload));
-            e.dataTransfer.effectAllowed = "move";
-            onDragPayloadStart?.(dragPayload);
-          }}
-          onDragEnd={() => {
-            onDragPayloadEnd?.();
-          }}
-          aria-label={`Arrastrar aviso ${c.aviso.numero} a otro día (misma fila)`}
-          title="Arrastrar a otro día (misma fila)"
-          className="mt-px shrink-0 cursor-grab touch-none rounded p-0.5 text-muted-foreground hover:bg-muted/70 hover:text-foreground active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <GripVertical className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        </button>
-      ) : null}
-      <button
-        type="button"
-        title={
-          c.aviso.ordenPreviaPendiente
-            ? `Aviso ${c.aviso.numero} — orden previa pendiente de cierre`
-            : `Aviso ${c.aviso.numero}`
-        }
-        onClick={onAbrirDrawer}
-        className={cn(
-          chipClassNameBoton,
-          clasesProgramaChip(c.aviso, {
-            ordenServicioIdEfectiva,
-            estado: estadoServicio,
-            cargando: cargandoEstadoServicio,
-          }),
-        )}
-      >
-        <span className="flex w-full flex-col items-stretch gap-0.5 text-left">
-          <span className="text-[10px] font-semibold leading-none sm:text-[11px]">
-            {etiquetaEspecialidadEnChip(c.especialidad)}
-          </span>
-          <span className="line-clamp-2 [overflow-wrap:anywhere] opacity-95">
-            {c.aviso.descripcion?.trim() || "—"}
-          </span>
+    <button
+      type="button"
+      draggable={Boolean(dragPayload)}
+      title={dragPayload ? `${tituloChip} — mantené apretado y soltá en otro día (misma fila)` : tituloChip}
+      onDragStart={
+        dragPayload
+          ? (e) => {
+              omitirClickTrasArrastre.current = false;
+              e.dataTransfer.setData(MIME_PROGRAMA_AVISO_DRAG, JSON.stringify(dragPayload));
+              e.dataTransfer.effectAllowed = "move";
+              onDragPayloadStart?.(dragPayload);
+            }
+          : undefined
+      }
+      onDragEnd={
+        dragPayload
+          ? () => {
+              omitirClickTrasArrastre.current = true;
+              window.setTimeout(() => {
+                omitirClickTrasArrastre.current = false;
+              }, 0);
+              onDragPayloadEnd?.();
+            }
+          : undefined
+      }
+      onClick={() => {
+        if (omitirClickTrasArrastre.current) return;
+        onAbrirDrawer();
+      }}
+      className={cn(
+        chipClassNameBoton,
+        dragPayload && "cursor-grab touch-none active:cursor-grabbing",
+        clasesProgramaChip(c.aviso, {
+          ordenServicioIdEfectiva,
+          estado: estadoServicio,
+          cargando: cargandoEstadoServicio,
+        }),
+      )}
+    >
+      <span className="flex w-full flex-col items-stretch gap-0.5 text-left">
+        <span className="text-[10px] font-semibold leading-none sm:text-[11px]">
+          {etiquetaEspecialidadEnChip(c.especialidad)}
         </span>
-      </button>
-    </div>
+        <span className="line-clamp-2 [overflow-wrap:anywhere] opacity-95">
+          {c.aviso.descripcion?.trim() || "—"}
+        </span>
+      </span>
+    </button>
   );
 }
 
@@ -2127,8 +2135,8 @@ export function ProgramaClient() {
                 la grilla; <strong>estado operativo</strong> incluye las etapas de la leyenda (colores del chip) y la
                 opción <strong>orden previa (SAP)</strong>: solo avisos con el aro rojo (nuevo aviso mientras sigue{" "}
                 <strong>abierta</strong> una orden del mismo mantenimiento). Para{" "}
-                <strong>arrastrar un aviso a otro día</strong> necesitás ver todos los días: dejá <strong>Día</strong> en
-                «Todos».
+                <strong>arrastrar una tarea a otro día</strong> (mantené apretada la tarjeta y soltala en la columna del
+                día), necesitás ver todos los días: dejá <strong>Día</strong> en «Todos».
               </p>
               {vistaTodasPlantas ? (
                 <p className="text-muted-foreground">
@@ -2271,8 +2279,8 @@ export function ProgramaClient() {
 
       {puedeMoverEnProgramaPublicado && filtroDia !== "todos" ? (
         <p className="rounded-lg border border-amber-200/60 bg-amber-50/50 px-3 py-2 text-xs leading-relaxed text-amber-950 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100">
-          Para <strong>mover tareas entre días con el mouse</strong>, el filtro <strong>Día</strong> tiene que estar en
-          «Todos», así se ven Lun–Dom y podés soltar en otro día.
+          Para <strong>mover tareas entre días</strong>, dejá el filtro <strong>Día</strong> en «Todos» (columnas Lun–Dom),
+          mantené apretada una tarjeta y soltala en la columna del día destino (misma fila de localidad).
         </p>
       ) : null}
       {dndFlashMsg ? (

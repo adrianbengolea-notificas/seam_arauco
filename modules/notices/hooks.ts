@@ -19,7 +19,59 @@ import { startTransition, useEffect, useMemo, useState } from "react";
 
 const LIST_LIMIT = 450;
 
-export type TabImportacionAvisosId = ModoImportacionAvisos | "semanal_info";
+export type TabImportacionAvisosId = ModoImportacionAvisos | "semanal_info" | "todos";
+
+function frecuenciaEnumDesdeMtsa(letter: "M" | "T" | "S" | "A"): Aviso["frecuencia"] {
+  if (letter === "M") return "MENSUAL";
+  if (letter === "T") return "TRIMESTRAL";
+  if (letter === "S") return "SEMESTRAL";
+  return "ANUAL";
+}
+
+/** Incluye badge M/T/S/A o, si falta, la frecuencia enum del maestro importado. */
+function avisoCoincideTabPreventivoMtsa(a: Aviso, letter: "M" | "T" | "S" | "A"): boolean {
+  if (a.tipo !== "PREVENTIVO") return false;
+  if (a.frecuencia_plan_mtsa === letter) return true;
+  if (!a.frecuencia_plan_mtsa?.trim() && a.frecuencia === frecuenciaEnumDesdeMtsa(letter)) return true;
+  return false;
+}
+
+async function fetchPreventivosPorTabMtsa(
+  db: Firestore,
+  letter: "M" | "T" | "S" | "A",
+  scoped: boolean,
+  centro: string,
+): Promise<Aviso[]> {
+  const col = collection(db, COLLECTIONS.avisos);
+  const map = new Map<string, Aviso>();
+
+  const ingest = (docs: { id: string; data: () => Record<string, unknown> }[]) => {
+    for (const d of docs) {
+      const a = { id: d.id, ...d.data() } as Aviso;
+      if (avisoCoincideTabPreventivoMtsa(a, letter)) map.set(a.id, a);
+    }
+  };
+
+  const qMtsa = scoped
+    ? query(col, where("centro", "==", centro), where("frecuencia_plan_mtsa", "==", letter), limit(LIST_LIMIT))
+    : query(col, where("frecuencia_plan_mtsa", "==", letter), limit(LIST_LIMIT));
+  ingest((await getDocs(qMtsa)).docs);
+
+  const freqMatch = frecuenciaEnumDesdeMtsa(letter);
+  try {
+    const qF = scoped
+      ? query(col, where("centro", "==", centro), where("frecuencia", "==", freqMatch), limit(LIST_LIMIT))
+      : query(col, where("frecuencia", "==", freqMatch), limit(LIST_LIMIT));
+    ingest((await getDocs(qF)).docs);
+  } catch {
+    const qPrev = scoped
+      ? query(col, where("centro", "==", centro), where("tipo", "==", "PREVENTIVO"), limit(LIST_LIMIT))
+      : query(col, where("tipo", "==", "PREVENTIVO"), limit(LIST_LIMIT));
+    ingest((await getDocs(qPrev)).docs);
+  }
+
+  return [...map.values()];
+}
 
 /**
  * Avisos mostrados en Configuración e importación, según pestaña (tabs alineadas a modos Excel).
@@ -35,6 +87,12 @@ export async function fetchAvisosImportacionConfig(
   const scoped = !verTodosLosCentros && Boolean(c);
 
   if (tabId === "semanal_info") return [];
+
+  if (tabId === "todos") {
+    const q = scoped ? query(col, where("centro", "==", c), limit(LIST_LIMIT)) : query(col, limit(LIST_LIMIT));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Aviso);
+  }
 
   if (tabId === "preventivos_todas") {
     const q = scoped
@@ -77,40 +135,7 @@ export async function fetchAvisosImportacionConfig(
   const letter = mtsaFromTab[tabId];
   if (!letter) return [];
 
-  const qMtsa = scoped
-    ? query(col, where("centro", "==", c), where("frecuencia_plan_mtsa", "==", letter), limit(LIST_LIMIT))
-    : query(col, where("frecuencia_plan_mtsa", "==", letter), limit(LIST_LIMIT));
-
-  const freqMatch: Aviso["frecuencia"] =
-    letter === "M"
-      ? "MENSUAL"
-      : letter === "T"
-        ? "TRIMESTRAL"
-        : letter === "S"
-          ? "SEMESTRAL"
-          : "ANUAL";
-
-  const snapM = await getDocs(qMtsa);
-  const map = new Map<string, Aviso>();
-  for (const d of snapM.docs) {
-    const a = { id: d.id, ...d.data() } as Aviso;
-    if (a.tipo === "PREVENTIVO") map.set(a.id, a);
-  }
-
-  try {
-    const qF = scoped
-      ? query(col, where("centro", "==", c), where("frecuencia", "==", freqMatch), limit(LIST_LIMIT))
-      : query(col, where("frecuencia", "==", freqMatch), limit(LIST_LIMIT));
-    const snapF = await getDocs(qF);
-    for (const d of snapF.docs) {
-      const a = { id: d.id, ...d.data() } as Aviso;
-      if (a.tipo === "PREVENTIVO") map.set(a.id, a);
-    }
-  } catch {
-    /* Índice compuesto (centro+frecuencia) no desplegado: se listan solo los que tienen badge M/T/S/A. */
-  }
-
-  return [...map.values()];
+  return fetchPreventivosPorTabMtsa(db, letter, scoped, c);
 }
 
 export function useAvisosListaImportacionConfig(input: {
@@ -243,4 +268,96 @@ export function useAvisoLive(avisoId: string | undefined, authUid: string | unde
   }, [key, authUid]);
 
   return { aviso, loading, error };
+}
+
+const CORRECTIVOS_LIST_LIMIT = 450;
+
+/** Avisos importados o dados de alta como correctivos, estado ABIERTO (pendientes de OT o de programa). */
+export function useAvisosCorrectivosPendientes(input: {
+  authUid: string | undefined;
+  centro: string | undefined;
+  verTodosLosCentros: boolean;
+  enabled?: boolean;
+}): { avisos: Aviso[]; loading: boolean; error: Error | null } {
+  const enabled = input.enabled !== false;
+  const [avisos, setAvisos] = useState<Aviso[]>([]);
+  const [loading, setLoading] = useState(Boolean(input.authUid && enabled));
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    if (!enabled || !input.authUid) {
+      setAvisos([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    let cancelled = false;
+    let unsub: Unsubscribe | undefined;
+
+    setLoading(true);
+    setError(null);
+
+    void (async () => {
+      const auth = getFirebaseAuth();
+      await auth.authStateReady();
+      if (cancelled || !auth.currentUser) {
+        if (!cancelled) {
+          setAvisos([]);
+          setLoading(false);
+        }
+        return;
+      }
+
+      const db = getFirebaseDb();
+      const col = collection(db, COLLECTIONS.avisos);
+      const q = input.verTodosLosCentros
+        ? query(col, where("tipo", "==", "CORRECTIVO"), limit(CORRECTIVOS_LIST_LIMIT))
+        : input.centro?.trim()
+          ? query(
+              col,
+              where("centro", "==", input.centro.trim()),
+              where("tipo", "==", "CORRECTIVO"),
+              limit(CORRECTIVOS_LIST_LIMIT),
+            )
+          : null;
+
+      if (!q) {
+        if (!cancelled) {
+          setAvisos([]);
+          setLoading(false);
+        }
+        return;
+      }
+
+      unsub = onSnapshot(
+        q,
+        (snap) => {
+          if (cancelled) return;
+          const list = snap.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<Aviso, "id">) }) as Aviso)
+            .filter((a) => {
+              const st = String(a.estado ?? "ABIERTO").trim().toUpperCase();
+              return st === "ABIERTO" || st === "";
+            })
+            .sort((a, b) => a.n_aviso.localeCompare(b.n_aviso, "es", { numeric: true }));
+          setAvisos(list);
+          setLoading(false);
+          setError(null);
+        },
+        (err) => {
+          if (cancelled) return;
+          setError(err);
+          setLoading(false);
+        },
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
+  }, [enabled, input.authUid, input.centro, input.verTodosLosCentros]);
+
+  return { avisos, loading, error };
 }

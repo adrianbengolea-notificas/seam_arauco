@@ -2,6 +2,7 @@
 
 import { confirmarImportAvisos, previewImportAvisos } from "@/app/actions/import";
 import { actionEditAviso } from "@/app/actions/avisos";
+import { actionAddAvisoToProgramaPublicado } from "@/app/actions/schedule";
 import type { ResultadoImportacionAvisos } from "@/lib/importaciones/avisos-excel-admin";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,13 +11,23 @@ import { MAX_EXCEL_IMPORT_BYTES } from "@/lib/config/limits";
 import { usePermisos } from "@/lib/permisos/usePermisos";
 import { cn } from "@/lib/utils";
 import { useAvisosListaImportacionConfig, type TabImportacionAvisosId } from "@/modules/notices/hooks";
-import type { Aviso } from "@/modules/notices/types";
+import type { Aviso, Especialidad, EstadoAviso, EstadoVencimientoAviso } from "@/modules/notices/types";
 import { getClientIdToken, useAuthUser } from "@/modules/users/hooks";
 import type { ParseResult } from "@/lib/import/parse-avisos-excel";
 import type { ModoImportacionAvisos } from "@/lib/import/modo-importacion";
+import {
+  diaIsoSemanaADiaPrograma,
+  getIsoWeekId,
+  isoDiaSemanaDesdeDateLocal,
+  parseIsoWeekToBounds,
+  shiftIsoWeekId,
+} from "@/modules/scheduling/iso-week";
+import type { DiaSemanaPrograma } from "@/modules/scheduling/types";
+import { format } from "date-fns";
+import { es } from "date-fns/locale";
 import { FileSpreadsheet, Loader2 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   KNOWN_CENTROS,
   nombreCentro,
@@ -44,47 +55,79 @@ const TAB_DEFS: {
   description: string;
   hidden?: boolean;
 }[] = [
+  { id: "todos", label: "Todos", description: "Todos los avisos cargados (preventivos y correctivos)." },
   {
     id: "preventivos_todas",
-    label: "Todos los preventivos",
-    description: "Muestra todos los avisos preventivos (mensual, trimestral, semestral y anual) que ya están en la base de datos.",
+    label: "Preventivos",
+    description: "Avisos preventivos (mensual, trimestral, semestral y anual).",
   },
+  { id: "preventivos_mensual", label: "Mensual", description: "Frecuencia mensual (M)." },
+  { id: "preventivos_trimestral", label: "Trimestral", description: "Frecuencia trimestral (T)." },
+  { id: "preventivos_semestral", label: "Semestral", description: "Frecuencia semestral (S)." },
+  { id: "preventivos_anual", label: "Anual", description: "Frecuencia anual (A)." },
   {
-    id: "preventivos_mensual",
-    label: "Mensual",
-    description: "Filtra los avisos con frecuencia mensual.",
+    id: "listado_semestral_anual",
+    label: "Sem. + Anual",
+    description: "Preventivos con badge semestral o anual.",
   },
-  {
-    id: "preventivos_trimestral",
-    label: "Trimestral",
-    description: "Filtra los avisos con frecuencia trimestral.",
-  },
-  {
-    id: "preventivos_semestral",
-    label: "Semestral",
-    description: "Filtra los avisos con frecuencia semestral.",
-  },
-  {
-    id: "preventivos_anual",
-    label: "Anual",
-    description: "Filtra los avisos con frecuencia anual.",
-  },
-  {
-    id: "correctivos",
-    label: "Correctivos",
-    description: "Filtra los avisos de tipo correctivo.",
-  },
+  { id: "correctivos", label: "Correctivos", description: "Avisos de tipo correctivo." },
   {
     id: "mensuales_parche",
     label: "Parche mensuales",
-    description: "Herramienta para reimportar solo el estado y fecha de avisos mensuales desde un Excel legado (MENSUALES_*.xlsx), sin tocar el resto.",
+    description: "Reimportar estado/fecha de mensuales (MENSUALES_*.xlsx).",
   },
-  // Ocultos de la barra pero usables internamente
-  { id: "listado_semestral_anual", label: "Listado S/A", description: "", hidden: true },
   { id: "semanal_info", label: "Aviso semanal (futuro)", description: "", hidden: true },
 ];
 
-const ESPECIALIDADES: Aviso["especialidad"][] = ["AA", "ELECTRICO", "GG"];
+const ESPECIALIDADES: Especialidad[] = ["AA", "ELECTRICO", "GG", "HG"];
+
+type FiltroOtLista = "todos" | "con_ot" | "sin_ot";
+type FiltroProgramaLista = "todos" | "en_semana" | "sin_semana";
+
+const DIAS_PROG: { value: DiaSemanaPrograma; label: string }[] = [
+  { value: "lunes", label: "Lunes" },
+  { value: "martes", label: "Martes" },
+  { value: "miercoles", label: "Miércoles" },
+  { value: "jueves", label: "Jueves" },
+  { value: "viernes", label: "Viernes" },
+  { value: "sabado", label: "Sábado" },
+  { value: "domingo", label: "Domingo" },
+];
+
+function avisoTieneOrdenVinculada(a: Aviso): boolean {
+  if (String(a.work_order_id ?? "").trim()) return true;
+  if (String(a.antecesor_orden_abierta?.work_order_id ?? "").trim()) return true;
+  return false;
+}
+
+function isoSemanaPrograma(a: Aviso): string | null {
+  const iso = String(a.incluido_en_semana ?? "").trim();
+  return /^\d{4}-W\d{2}$/.test(iso) ? iso : null;
+}
+
+function hrefProgramaSemanal(centro: string, weekId: string): string {
+  const p = new URLSearchParams();
+  p.set("semana", weekId);
+  if (centro.trim()) p.set("centro", centro.trim());
+  return `/programa?${p.toString()}`;
+}
+
+function fechaAvisoAInput(a: Aviso): string {
+  const fp = a.fecha_programada;
+  if (fp != null && typeof (fp as { toDate?: () => Date }).toDate === "function") {
+    const d = (fp as { toDate: () => Date }).toDate();
+    if (!Number.isNaN(d.getTime())) return format(d, "yyyy-MM-dd");
+  }
+  return format(new Date(), "yyyy-MM-dd");
+}
+
+function semanaYDiaDesdeFecha(fechaYmd: string): { weekId: string; dia: DiaSemanaPrograma } {
+  const d = new Date(`${fechaYmd}T12:00:00`);
+  return {
+    weekId: getIsoWeekId(d),
+    dia: diaIsoSemanaADiaPrograma(isoDiaSemanaDesdeDateLocal(d)),
+  };
+}
 
 // ─── Preview & commit result panels ──────────────────────────────────────────
 
@@ -493,7 +536,17 @@ function PasoImportacion({
 
 // ─── Editable row (auditing table) ───────────────────────────────────────────
 
-function FilaAvisoEditable({ aviso, alGuardar }: { aviso: Aviso; alGuardar: () => void }) {
+function FilaAvisoEditable({
+  aviso,
+  alGuardar,
+  puedeProgramar,
+  onAsignarPrograma,
+}: {
+  aviso: Aviso;
+  alGuardar: () => void;
+  puedeProgramar: boolean;
+  onAsignarPrograma: (a: Aviso) => void;
+}) {
   const [textoCorto, setTextoCorto] = useState(aviso.texto_corto ?? "");
   const [centro, setCentro] = useState(aviso.centro ?? "");
   const [especialidad, setEspecialidad] = useState<Aviso["especialidad"]>(aviso.especialidad);
@@ -538,6 +591,14 @@ function FilaAvisoEditable({ aviso, alGuardar }: { aviso: Aviso; alGuardar: () =
     }
   }, [alGuardar, aviso.id, centro, especialidad, estadoPlanilla, textoCorto]);
 
+  const tieneOt = avisoTieneOrdenVinculada(aviso);
+  const isoProg = isoSemanaPrograma(aviso);
+  const centroHref = (centro.trim() || aviso.centro?.trim() || "").trim();
+  const otId =
+    aviso.work_order_id?.trim() ||
+    aviso.antecesor_orden_abierta?.work_order_id?.trim() ||
+    aviso.ultima_ejecucion_ot_id?.trim();
+
   return (
     <tr className="border-t border-border align-top">
       <td className="whitespace-nowrap px-2 py-2 font-mono text-xs text-foreground">{aviso.n_aviso}</td>
@@ -573,7 +634,7 @@ function FilaAvisoEditable({ aviso, alGuardar }: { aviso: Aviso; alGuardar: () =
         />
       </td>
       <td className="whitespace-nowrap px-2 py-1.5">
-        <div className="flex flex-col items-stretch gap-1">
+        <div className="flex min-w-[10rem] flex-col items-stretch gap-1">
           <Button
             type="button"
             size="sm"
@@ -585,6 +646,43 @@ function FilaAvisoEditable({ aviso, alGuardar }: { aviso: Aviso; alGuardar: () =
             {busy ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden /> : null}
             Guardar cambios
           </Button>
+          {puedeProgramar ? (
+            <div className="flex flex-col gap-0.5 border-t border-border/60 pt-1">
+              {tieneOt && otId ? (
+                <Link
+                  href={`/tareas/${otId}`}
+                  className="text-[10px] font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  Ver OT
+                </Link>
+              ) : (
+                <Link
+                  href={`/tareas/nueva?avisoId=${encodeURIComponent(aviso.id)}`}
+                  className="text-[10px] font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  Crear OT
+                </Link>
+              )}
+              {isoProg && centroHref ? (
+                <Link
+                  href={hrefProgramaSemanal(centroHref, isoProg)}
+                  className="text-[10px] font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  Programa {isoProg}
+                </Link>
+              ) : !tieneOt ? (
+                <button
+                  type="button"
+                  className="text-left text-[10px] font-medium text-primary underline-offset-2 hover:underline"
+                  onClick={() => onAsignarPrograma(aviso)}
+                >
+                  {aviso.tipo === "CORRECTIVO" ? "Ubicar en semana" : "Asignar a semana"}
+                </button>
+              ) : (
+                <span className="text-[10px] text-muted-foreground">Sin semana en grilla</span>
+              )}
+            </div>
+          ) : null}
           {retro ? <span className="text-[10px] text-muted-foreground">{retro}</span> : null}
         </div>
       </td>
@@ -592,16 +690,32 @@ function FilaAvisoEditable({ aviso, alGuardar }: { aviso: Aviso; alGuardar: () =
   );
 }
 
+type SeccionPrincipalAvisos = "listado" | "importacion";
+
+const SECCION_PRINCIPAL_DEFS: { id: SeccionPrincipalAvisos; label: string }[] = [
+  { id: "listado", label: "Ver / editar avisos existentes" },
+  { id: "importacion", label: "Importación (Excel)" },
+];
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function ConfiguracionImportacionClient() {
   const { puede, rol, centro: perfilCentro } = usePermisos();
   const { user } = useAuthUser();
   const puedeImportar = puede("admin:cargar_programa");
+  const puedeProgramar = puede("programa:crear_ot") || puede("programa:editar");
   const verTodosLosCentros = rol === "superadmin";
 
-  const [tab, setTab] = useState<TabImportacionAvisosId>("preventivos_todas");
+  const [seccionPrincipal, setSeccionPrincipal] = useState<SeccionPrincipalAvisos>("listado");
+  const [tab, setTab] = useState<TabImportacionAvisosId>("todos");
   const [listaRefresh, setListaRefresh] = useState(0);
+  const [busqueda, setBusqueda] = useState("");
+  const [filtroCentroLista, setFiltroCentroLista] = useState("");
+  const [filtroEspLista, setFiltroEspLista] = useState<"" | Especialidad>("");
+  const [filtroOtLista, setFiltroOtLista] = useState<FiltroOtLista>("todos");
+  const [filtroProgramaLista, setFiltroProgramaLista] = useState<FiltroProgramaLista>("todos");
+  const [filtroEstadoLista, setFiltroEstadoLista] = useState<"" | EstadoAviso>("");
+  const [filtroVencLista, setFiltroVencLista] = useState<"" | EstadoVencimientoAviso>("");
 
   /* Legacy parche (mensuales_parche) — kept for the tab panel */
   const [legacyFile, setLegacyFile] = useState<File | null>(null);
@@ -619,6 +733,167 @@ export function ConfiguracionImportacionClient() {
   });
 
   const recargarLista = useCallback(() => setListaRefresh((n) => n + 1), []);
+
+  const [dialogProgramaOpen, setDialogProgramaOpen] = useState(false);
+  const [pickPrograma, setPickPrograma] = useState<Aviso | null>(null);
+  const [weekIdProg, setWeekIdProg] = useState(() => getIsoWeekId(new Date()));
+  const [diaProg, setDiaProg] = useState<DiaSemanaPrograma>("lunes");
+  const [fechaCorrectivo, setFechaCorrectivo] = useState(() => format(new Date(), "yyyy-MM-dd"));
+  const [progBusy, setProgBusy] = useState(false);
+  const [progMsg, setProgMsg] = useState<string | null>(null);
+
+  const esDialogCorrectivo = pickPrograma?.tipo === "CORRECTIVO";
+
+  const opcionesSemanaIso = useMemo(() => {
+    const hoy = getIsoWeekId(new Date());
+    const out: { id: string; label: string }[] = [];
+    for (let d = -8; d <= 24; d++) {
+      const id = shiftIsoWeekId(hoy, d);
+      const { start, end } = parseIsoWeekToBounds(id);
+      const rango = `${format(start, "d MMM", { locale: es })} – ${format(end, "d MMM yyyy", { locale: es })}`;
+      out.push({ id, label: `${id} · ${rango}` });
+    }
+    return out;
+  }, []);
+
+  const previewSemanaCorrectivo = useMemo(() => {
+    if (!esDialogCorrectivo || !fechaCorrectivo.trim()) return null;
+    const { weekId, dia } = semanaYDiaDesdeFecha(fechaCorrectivo);
+    const { start, end } = parseIsoWeekToBounds(weekId);
+    return {
+      weekId,
+      dia,
+      label: `${weekId} · ${format(start, "d MMM", { locale: es })} – ${format(end, "d MMM yyyy", { locale: es })} (${dia})`,
+    };
+  }, [esDialogCorrectivo, fechaCorrectivo]);
+
+  const abrirDialogoPrograma = useCallback((a: Aviso) => {
+    setPickPrograma(a);
+    setWeekIdProg(getIsoWeekId(new Date()));
+    setDiaProg("lunes");
+    setFechaCorrectivo(fechaAvisoAInput(a));
+    setProgMsg(null);
+    setDialogProgramaOpen(true);
+  }, []);
+
+  const agregarAlPrograma = useCallback(async () => {
+    if (!pickPrograma) return;
+    const c = (pickPrograma.centro ?? "").trim();
+    if (!c) {
+      setProgMsg("El aviso no tiene centro asignado.");
+      return;
+    }
+    let weekId = weekIdProg;
+    let dia = diaProg;
+    if (esDialogCorrectivo) {
+      const fecha = fechaCorrectivo.trim();
+      if (!fecha) {
+        setProgMsg("Elegí la fecha de realización.");
+        return;
+      }
+      ({ weekId, dia } = semanaYDiaDesdeFecha(fecha));
+    }
+    setProgBusy(true);
+    setProgMsg(null);
+    try {
+      const tok = await getClientIdToken();
+      if (!tok) throw new Error("Sin sesión");
+      const res = await actionAddAvisoToProgramaPublicado(tok, {
+        weekId,
+        avisoFirestoreId: pickPrograma.id,
+        dia,
+        localidad: pickPrograma.ubicacion_tecnica,
+      });
+      if (!res.ok) throw new Error(res.error.message);
+      setDialogProgramaOpen(false);
+      setPickPrograma(null);
+      recargarLista();
+      setProgMsg("Aviso agregado al programa semanal.");
+      window.setTimeout(() => setProgMsg(null), 4000);
+    } catch (e) {
+      setProgMsg(e instanceof Error ? e.message : "Error al asignar");
+    } finally {
+      setProgBusy(false);
+    }
+  }, [pickPrograma, weekIdProg, diaProg, fechaCorrectivo, esDialogCorrectivo, recargarLista]);
+
+  const resetFiltrosLista = useCallback(() => {
+    setBusqueda("");
+    setFiltroCentroLista("");
+    setFiltroEspLista("");
+    setFiltroOtLista("todos");
+    setFiltroProgramaLista("todos");
+    setFiltroEstadoLista("");
+    setFiltroVencLista("");
+  }, []);
+
+  const hayFiltrosListaActivos = useMemo(
+    () =>
+      Boolean(busqueda.trim()) ||
+      Boolean(filtroCentroLista) ||
+      Boolean(filtroEspLista) ||
+      filtroOtLista !== "todos" ||
+      filtroProgramaLista !== "todos" ||
+      Boolean(filtroEstadoLista) ||
+      Boolean(filtroVencLista),
+    [
+      busqueda,
+      filtroCentroLista,
+      filtroEspLista,
+      filtroOtLista,
+      filtroProgramaLista,
+      filtroEstadoLista,
+      filtroVencLista,
+    ],
+  );
+
+  const avisosFiltrados = useMemo(() => {
+    let list = avisos;
+
+    if (filtroCentroLista) {
+      list = list.filter((a) => (a.centro ?? "").trim() === filtroCentroLista);
+    }
+    if (filtroEspLista) {
+      list = list.filter((a) => a.especialidad === filtroEspLista);
+    }
+    if (filtroOtLista === "con_ot") {
+      list = list.filter((a) => avisoTieneOrdenVinculada(a));
+    } else if (filtroOtLista === "sin_ot") {
+      list = list.filter((a) => !avisoTieneOrdenVinculada(a));
+    }
+    if (filtroProgramaLista === "en_semana") {
+      list = list.filter((a) => Boolean(isoSemanaPrograma(a)));
+    } else if (filtroProgramaLista === "sin_semana") {
+      list = list.filter((a) => !isoSemanaPrograma(a));
+    }
+    if (filtroEstadoLista) {
+      list = list.filter((a) => a.estado === filtroEstadoLista);
+    }
+    if (filtroVencLista) {
+      list = list.filter((a) => a.estado_vencimiento === filtroVencLista);
+    }
+
+    const needle = busqueda.trim().toLowerCase();
+    if (!needle) return list;
+    return list.filter(
+      (a) =>
+        a.n_aviso.toLowerCase().includes(needle) ||
+        (a.texto_corto ?? "").toLowerCase().includes(needle) ||
+        (a.centro ?? "").toLowerCase().includes(needle) ||
+        (a.ubicacion_tecnica ?? "").toLowerCase().includes(needle) ||
+        (a.estado_planilla ?? "").toLowerCase().includes(needle) ||
+        (a.estado ?? "").toLowerCase().includes(needle),
+    );
+  }, [
+    avisos,
+    busqueda,
+    filtroCentroLista,
+    filtroEspLista,
+    filtroOtLista,
+    filtroProgramaLista,
+    filtroEstadoLista,
+    filtroVencLista,
+  ]);
 
   const runLegacyParche = useCallback(
     async (dryRun: boolean) => {
@@ -698,77 +973,112 @@ export function ConfiguracionImportacionClient() {
       </CardHeader>
 
       <CardContent className="space-y-6">
-        {/* ── Preventivos: two-step upload blocks ── */}
-        <div className="space-y-4">
-          <h2 className="text-sm font-semibold text-foreground">Carga de preventivos (maestro + calendario M/T)</h2>
-          <PasoImportacion
-            paso={1}
-            tab="listado_semestral_anual"
-            tituloArchivo="Listado_avisos_Semestral-Anual.xlsx"
-            descripcionArchivo="Export SAP con una sola hoja y la columna CePl (centro). Carga los avisos semestrales y anuales con el centro correcto (PT01, PC01, PM02…)."
-            user={user}
-            puedeImportar={puedeImportar}
-            onImportado={recargarLista}
-          />
-          <PasoImportacion
-            paso={2}
-            tab="preventivos_todas"
-            tituloArchivo="AVISOS PREVENTIVOS Abril 26 - Marzo 27.xlsx"
-            descripcionArchivo="Maestro con hojas MEN / TRIM / SEM / ANU. Los meses del calendario anual para mensual y trimestral no se generan acá: deben venir de los Excel de Arauco (pasos 3 y 4). Semestral/anual pueden seguir usando columnas de mes en este archivo."
-            user={user}
-            puedeImportar={puedeImportar}
-            onImportado={recargarLista}
-          />
-          <PasoImportacion
-            paso={3}
-            tab="calendario_mensual"
-            tituloArchivo="Calendario_avisos_MENSUAL_Arauco.xlsx"
-            descripcionArchivo="Planilla oficial con nº de aviso SAP y marcas en columnas de mes (enero…diciembre). Solo actualiza meses en avisos ya cargados con frecuencia mensual; no crea avisos nuevos."
-            user={user}
-            puedeImportar={puedeImportar}
-            onImportado={recargarLista}
-          />
-          <PasoImportacion
-            paso={4}
-            tab="calendario_trimestral"
-            tituloArchivo="Calendario_avisos_TRIMESTRAL_Arauco.xlsx"
-            descripcionArchivo="Igual que el mensual pero para hoja trimestral: marcas en meses y nº de aviso. Solo actualiza avisos trimestrales existentes."
-            user={user}
-            puedeImportar={puedeImportar}
-            onImportado={recargarLista}
-          />
+        <div
+          role="tablist"
+          aria-label="Sección principal de avisos"
+          className="flex flex-wrap gap-1 border-b border-border pb-2"
+        >
+          {SECCION_PRINCIPAL_DEFS.map((s) => {
+            const selected = seccionPrincipal === s.id;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                className={cn(
+                  "rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30",
+                  selected
+                    ? "bg-surface text-foreground ring-1 ring-brand/40"
+                    : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
+                )}
+                onClick={() => setSeccionPrincipal(s.id)}
+              >
+                {s.label}
+              </button>
+            );
+          })}
         </div>
 
-        <hr className="border-border" />
+        {seccionPrincipal === "importacion" ? (
+          <div role="tabpanel" className="space-y-6">
+            <p className="text-xs text-muted-foreground">
+              Cada importación hace <strong>merge</strong> — actualiza lo existente sin borrar nada. Usá esta sección
+              solo cuando recibas planillas nuevas de Arauco o SAP.
+            </p>
 
-        {/* ── Correctivos ── */}
-        <div className="space-y-4">
-          <h2 className="text-sm font-semibold text-foreground">Carga de correctivos (semanal)</h2>
-          <PasoImportacion
-            paso={1}
-            tab="correctivos"
-            tituloArchivo="CORRECTIVOS-MES AÑO.xlsx"
-            descripcionArchivo="Planilla de correctivos con columnas: N° DE AVISO · UBICACIÓN TÉCNICA · DESCRIPCIÓN · ESPECIALIDAD · FECHA REALIZACIÓN. El centro se detecta automáticamente por el prefijo de la UT (PIRA→PT01, ESP→PC01…). Podés forzarlo si todos los avisos son del mismo centro."
-            user={user}
-            puedeImportar={puedeImportar}
-            onImportado={recargarLista}
-          />
-        </div>
+            {/* ── Preventivos: two-step upload blocks ── */}
+            <div className="space-y-4">
+              <h2 className="text-sm font-semibold text-foreground">Carga de preventivos (maestro + calendario M/T)</h2>
+              <PasoImportacion
+                paso={1}
+                tab="listado_semestral_anual"
+                tituloArchivo="Listado_avisos_Semestral-Anual.xlsx"
+                descripcionArchivo="Export SAP con una sola hoja y la columna CePl (centro). Carga los avisos semestrales y anuales con el centro correcto (PT01, PC01, PM02…)."
+                user={user}
+                puedeImportar={puedeImportar}
+                onImportado={recargarLista}
+              />
+              <PasoImportacion
+                paso={2}
+                tab="preventivos_todas"
+                tituloArchivo="AVISOS PREVENTIVOS Abril 26 - Marzo 27.xlsx"
+                descripcionArchivo="Maestro con hojas MEN / TRIM / SEM / ANU. Los meses del calendario anual para mensual y trimestral no se generan acá: deben venir de los Excel de Arauco (pasos 3 y 4). Semestral/anual pueden seguir usando columnas de mes en este archivo."
+                user={user}
+                puedeImportar={puedeImportar}
+                onImportado={recargarLista}
+              />
+              <PasoImportacion
+                paso={3}
+                tab="calendario_mensual"
+                tituloArchivo="Calendario_avisos_MENSUAL_Arauco.xlsx"
+                descripcionArchivo="Planilla oficial con nº de aviso SAP y marcas en columnas de mes (enero…diciembre). Solo actualiza meses en avisos ya cargados con frecuencia mensual; no crea avisos nuevos."
+                user={user}
+                puedeImportar={puedeImportar}
+                onImportado={recargarLista}
+              />
+              <PasoImportacion
+                paso={4}
+                tab="calendario_trimestral"
+                tituloArchivo="Calendario_avisos_TRIMESTRAL_Arauco.xlsx"
+                descripcionArchivo="Igual que el mensual pero para hoja trimestral: marcas en meses y nº de aviso. Solo actualiza avisos trimestrales existentes."
+                user={user}
+                puedeImportar={puedeImportar}
+                onImportado={recargarLista}
+              />
+            </div>
 
-        <hr className="border-border" />
+            <hr className="border-border" />
 
-        {/* ── Auditing tabs (filtros de visualización) ── */}
-        <div className="space-y-4">
-          <h2 className="text-sm font-semibold text-foreground">Ver / editar avisos existentes</h2>
-          <p className="text-xs text-muted-foreground -mt-2">
-            Las pestañas de abajo son <strong>filtros</strong> — no importan nada, solo muestran lo que ya está en la base de datos.
-          </p>
-
-          <div
-            role="tablist"
-            aria-label="Categorías de importación y listado"
-            className="flex flex-wrap gap-1 border-b border-border pb-2"
-          >
+            {/* ── Correctivos ── */}
+            <div className="space-y-4">
+              <h2 className="text-sm font-semibold text-foreground">Carga de correctivos (semanal)</h2>
+              <PasoImportacion
+                paso={1}
+                tab="correctivos"
+                tituloArchivo="CORRECTIVOS-MES AÑO.xlsx"
+                descripcionArchivo="Planilla de correctivos con columnas: N° DE AVISO · UBICACIÓN TÉCNICA · DESCRIPCIÓN · ESPECIALIDAD · FECHA REALIZACIÓN. El centro se detecta automáticamente por el prefijo de la UT (PIRA→PT01, ESP→PC01…). Podés forzarlo si todos los avisos son del mismo centro."
+                user={user}
+                puedeImportar={puedeImportar}
+                onImportado={recargarLista}
+              />
+              <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                Después de importar, programá cada correctivo en{" "}
+                <Link href="/programa/correctivos" className="font-medium text-primary underline underline-offset-2">
+                  Programa → Correctivos (Excel)
+                </Link>
+                : crear OT con fecha de realización o asignar fecha en el programa (sin motor).
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div role="tabpanel" className="space-y-4">
+            <div
+              role="tablist"
+              aria-label="Filtros de avisos en base de datos"
+              className="flex flex-wrap gap-1 border-b border-border pb-2"
+            >
             {TAB_DEFS.filter((t) => !t.hidden).map((t) => {
               const selected = tab === t.id;
               return (
@@ -786,6 +1096,7 @@ export function ConfiguracionImportacionClient() {
                   )}
                   onClick={() => {
                     setTab(t.id);
+                    resetFiltrosLista();
                     setLegacyResult(null);
                     setLegacyError(null);
                   }}
@@ -904,8 +1215,132 @@ export function ConfiguracionImportacionClient() {
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Muestra avisos que <strong className="text-foreground/90">ya existen en la base de datos</strong> filtrados por la pestaña activa.
                   Usá <strong className="text-foreground/90">Guardar cambios</strong> para editar texto corto, centro,
-                  especialidad o estado de planilla de una fila (no reimporta el Excel).
+                  especialidad o estado de planilla.
+                  {puedeProgramar ? (
+                    <>
+                      {" "}
+                      Con permiso de programa también podés <strong className="text-foreground/90">crear OT</strong> o{" "}
+                      <strong className="text-foreground/90">asignar a una semana</strong> del calendario publicado (igual que en
+                      Vencimientos o Correctivos).
+                    </>
+                  ) : null}
                 </p>
+                {progMsg && !dialogProgramaOpen ? (
+                  <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-foreground" role="status">
+                    {progMsg}
+                  </p>
+                ) : null}
+
+                <div className="rounded-xl border border-border bg-muted/15 p-3 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-foreground">Filtros</span>
+                    {hayFiltrosListaActivos ? (
+                      <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={resetFiltrosLista}>
+                        Limpiar filtros
+                      </Button>
+                    ) : null}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                    {verTodosLosCentros ? (
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Centro</span>
+                        <select
+                          className="h-9 rounded-md border border-border bg-surface px-2 text-xs"
+                          value={filtroCentroLista}
+                          disabled={listaLoading}
+                          onChange={(e) => setFiltroCentroLista(e.target.value)}
+                        >
+                          <option value="">Todos</option>
+                          {[...KNOWN_CENTROS].map((c) => (
+                            <option key={c} value={c}>
+                              {nombreCentro(c)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Especialidad</span>
+                      <select
+                        className="h-9 rounded-md border border-border bg-surface px-2 text-xs"
+                        value={filtroEspLista}
+                        disabled={listaLoading}
+                        onChange={(e) => setFiltroEspLista(e.target.value as "" | Especialidad)}
+                      >
+                        <option value="">Todas</option>
+                        {ESPECIALIDADES.map((e) => (
+                          <option key={e} value={e}>
+                            {e}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Orden de trabajo</span>
+                      <select
+                        className="h-9 rounded-md border border-border bg-surface px-2 text-xs"
+                        value={filtroOtLista}
+                        disabled={listaLoading}
+                        onChange={(e) => setFiltroOtLista(e.target.value as FiltroOtLista)}
+                      >
+                        <option value="todos">Todas</option>
+                        <option value="con_ot">Con OT</option>
+                        <option value="sin_ot">Sin OT</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Programa semanal</span>
+                      <select
+                        className="h-9 rounded-md border border-border bg-surface px-2 text-xs"
+                        value={filtroProgramaLista}
+                        disabled={listaLoading}
+                        onChange={(e) => setFiltroProgramaLista(e.target.value as FiltroProgramaLista)}
+                      >
+                        <option value="todos">Todos</option>
+                        <option value="en_semana">En semana</option>
+                        <option value="sin_semana">Sin semana</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Estado aviso</span>
+                      <select
+                        className="h-9 rounded-md border border-border bg-surface px-2 text-xs"
+                        value={filtroEstadoLista}
+                        disabled={listaLoading}
+                        onChange={(e) => setFiltroEstadoLista(e.target.value as "" | EstadoAviso)}
+                      >
+                        <option value="">Todos</option>
+                        <option value="ABIERTO">Abierto</option>
+                        <option value="OT_GENERADA">OT generada</option>
+                        <option value="CERRADO">Cerrado</option>
+                        <option value="ANULADO">Anulado</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Vencimiento</span>
+                      <select
+                        className="h-9 rounded-md border border-border bg-surface px-2 text-xs"
+                        value={filtroVencLista}
+                        disabled={listaLoading}
+                        onChange={(e) => setFiltroVencLista(e.target.value as "" | EstadoVencimientoAviso)}
+                      >
+                        <option value="">Todos</option>
+                        <option value="ok">Al día</option>
+                        <option value="proximo">Próximo</option>
+                        <option value="vencido">Vencido</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-foreground">Buscar</span>
+                    <Input
+                      value={busqueda}
+                      onChange={(e) => setBusqueda(e.target.value)}
+                      placeholder="Nº aviso, texto, centro, ubicación, estado…"
+                      disabled={listaLoading}
+                    />
+                  </label>
+                </div>
                 {listaError ? (
                   <p className="text-sm text-destructive" role="alert">{listaError.message}</p>
                 ) : null}
@@ -918,32 +1353,165 @@ export function ConfiguracionImportacionClient() {
                   <p className="text-sm text-muted-foreground">
                     No hay avisos que coincidan con esta pestaña (límite 450 filas).
                   </p>
+                ) : avisosFiltrados.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    {hayFiltrosListaActivos
+                      ? "Ningún aviso coincide con los filtros activos."
+                      : "No hay avisos en esta categoría."}
+                  </p>
                 ) : (
-                  <div className="overflow-x-auto rounded-xl border border-border">
-                    <table className="w-full min-w-[56rem] border-collapse text-left text-xs">
-                      <thead>
-                        <tr className="border-b border-border bg-muted/30 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          <th className="px-2 py-2">Nº aviso</th>
-                          <th className="px-2 py-2">Texto corto</th>
-                          <th className="px-2 py-2">Centro</th>
-                          <th className="px-2 py-2">Esp.</th>
-                          <th className="px-2 py-2 text-center">M/T/S/A</th>
-                          <th className="px-2 py-2">Est. planilla</th>
-                          <th className="px-2 py-2">Acción</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {avisos.map((a) => (
-                          <FilaAvisoEditable key={a.id} aviso={a} alGuardar={recargarLista} />
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="space-y-2">
+                    {hayFiltrosListaActivos ? (
+                      <p className="text-xs text-muted-foreground">
+                        {avisosFiltrados.length} de {avisos.length} avisos
+                      </p>
+                    ) : null}
+                    <div className="overflow-x-auto rounded-xl border border-border">
+                      <table className="w-full min-w-[56rem] border-collapse text-left text-xs">
+                        <thead>
+                          <tr className="border-b border-border bg-muted/30 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            <th className="px-2 py-2">Nº aviso</th>
+                            <th className="px-2 py-2">Texto corto</th>
+                            <th className="px-2 py-2">Centro</th>
+                            <th className="px-2 py-2">Esp.</th>
+                            <th className="px-2 py-2 text-center">M/T/S/A</th>
+                            <th className="px-2 py-2">Est. planilla</th>
+                            <th className="px-2 py-2">Acción</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {avisosFiltrados.map((a) => (
+                            <FilaAvisoEditable
+                              key={a.id}
+                              aviso={a}
+                              alGuardar={recargarLista}
+                              puedeProgramar={puedeProgramar}
+                              onAsignarPrograma={abrirDialogoPrograma}
+                            />
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
             </div>
           </div>
-        </div>
+          </div>
+        )}
       </CardContent>
+
+      {dialogProgramaOpen && pickPrograma && puedeProgramar ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cfg-prog-dlg-title"
+        >
+          <Card className="w-full max-w-md shadow-xl">
+            <CardHeader className="pb-2">
+              <CardTitle id="cfg-prog-dlg-title" className="text-base">
+                {esDialogCorrectivo ? "Ubicar correctivo en semana" : "Asignar aviso a semana del programa"}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <p>
+                Aviso <span className="font-mono">{pickPrograma.n_aviso}</span>
+                {pickPrograma.texto_corto ? (
+                  <>
+                    {" "}
+                    · {(pickPrograma.texto_corto ?? "").slice(0, 100)}
+                  </>
+                ) : null}
+              </p>
+              {esDialogCorrectivo ? (
+                <>
+                  <label className="flex flex-col gap-1 font-medium">
+                    Fecha de realización
+                    <Input
+                      type="date"
+                      value={fechaCorrectivo}
+                      onChange={(e) => setFechaCorrectivo(e.target.value)}
+                    />
+                  </label>
+                  {previewSemanaCorrectivo ? (
+                    <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-muted-foreground">
+                      Semana:{" "}
+                      <span className="font-medium text-foreground">{previewSemanaCorrectivo.label}</span>
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <label className="flex flex-col gap-1">
+                    Semana (ISO)
+                    <select
+                      className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={weekIdProg}
+                      onChange={(e) => setWeekIdProg(e.target.value)}
+                    >
+                      {opcionesSemanaIso.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    Día
+                    <select
+                      className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={diaProg}
+                      onChange={(e) => setDiaProg(e.target.value as DiaSemanaPrograma)}
+                    >
+                      {DIAS_PROG.map((d) => (
+                        <option key={d.value} value={d.value}>
+                          {d.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              )}
+              {progMsg && dialogProgramaOpen ? (
+                <p className="text-sm text-destructive" role="alert">
+                  {progMsg}
+                </p>
+              ) : null}
+              <div className="flex flex-wrap justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={progBusy}
+                  onClick={() => {
+                    setDialogProgramaOpen(false);
+                    setPickPrograma(null);
+                    setProgMsg(null);
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button type="button" disabled={progBusy} onClick={() => void agregarAlPrograma()}>
+                  {progBusy ? "Guardando…" : "Agregar al programa"}
+                </Button>
+                {pickPrograma.centro?.trim() ? (
+                  <Button type="button" variant="outline" disabled={progBusy} asChild>
+                    <Link
+                      href={hrefProgramaSemanal(
+                        pickPrograma.centro!.trim(),
+                        esDialogCorrectivo && previewSemanaCorrectivo
+                          ? previewSemanaCorrectivo.weekId
+                          : weekIdProg,
+                      )}
+                    >
+                      Ver grilla
+                    </Link>
+                  </Button>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
     </Card>
   );
 }

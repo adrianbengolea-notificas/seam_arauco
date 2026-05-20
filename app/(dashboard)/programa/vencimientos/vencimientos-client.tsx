@@ -1,5 +1,6 @@
 "use client";
 
+import { ProgramaSeccionNav } from "@/app/(dashboard)/programa/programa-seccion-nav";
 import { actionAddAvisoToProgramaPublicado, actionMoveAvisoEnProgramaPublicado } from "@/app/actions/schedule";
 import { CENTRO_NOMBRES, DEFAULT_CENTRO, KNOWN_CENTROS, nombreCentro } from "@/lib/config/app-config";
 import { mensajeErrorFirebaseParaUsuario } from "@/lib/firebase/mensaje-error-usuario";
@@ -11,6 +12,10 @@ import { Input } from "@/components/ui/input";
 import { PermisoGuard } from "@/components/auth/PermisoGuard";
 import { usePermisos } from "@/lib/permisos/usePermisos";
 import { cn } from "@/lib/utils";
+import {
+  avisoPasaFiltroEspecialidadUi,
+  type FiltroEspecialidadUi,
+} from "@/modules/notices/filtro-especialidad-aviso";
 import type { AvisoConVencimiento, UbicacionAvisoEnProgramaPublicado } from "@/modules/scheduling/hooks";
 import {
   FRECUENCIAS_PLAN_MTSA_VENCIMIENTOS_TODAS,
@@ -151,7 +156,7 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
     },
     [pathname, router, sp],
   );
-  const [esp, setEsp] = useState<"todos" | "AA" | "E" | "HG">("todos");
+  const [esp, setEsp] = useState<FiltroEspecialidadUi>("todos");
   const [estadoF, setEstadoF] = useState<"todos" | "vencido" | "proximo" | "ok">(() => {
     if (urlFilter === "vencido" || urlFilter === "proximo" || urlFilter === "ok") {
       return urlFilter;
@@ -250,8 +255,7 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
     if (superadmin && centroF.trim()) {
       rows = rows.filter((a) => a.centro === centroF.trim());
     }
-    if (esp === "AA") rows = rows.filter((a) => a.especialidad === "AA");
-    if (esp === "E") rows = rows.filter((a) => a.especialidad === "ELECTRICO");
+    rows = rows.filter((a) => avisoPasaFiltroEspecialidadUi(a.especialidad, esp));
     if (freq !== "todos") {
       rows = rows.filter((a) => a.frecuencia_plan_mtsa === freq);
     }
@@ -408,30 +412,19 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
             </>
           )}
         </p>
-        <nav className="mt-3 flex flex-wrap gap-2 border-b border-border pb-3 text-sm" aria-label="Secciones de programa">
-          <Link className="rounded-md px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground" href="/programa">
-            Programa semanal
-          </Link>
-          {puede("programa:crear_ot") ? (
-            <>
-              <span className="text-muted-foreground/70">·</span>
-              <Link
-                className="rounded-md px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                href="/programa/aprobacion"
-              >
-                Aprobación motor
-              </Link>
-            </>
-          ) : null}
-          {!dentroDelHub ? (
-            <>
-              <span className="text-muted-foreground/70">·</span>
-              <Link className="rounded-md px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground" href="/programa/preventivos">
-                Calendario anual de avisos
-              </Link>
-            </>
-          ) : null}
-        </nav>
+        <div className="mt-3">
+          <ProgramaSeccionNav vistaActual="preventivos" />
+        </div>
+        {!dentroDelHub ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            <Link
+              href="/programa/preventivos"
+              className="font-medium text-primary underline underline-offset-2"
+            >
+              Calendario anual de avisos
+            </Link>
+          </p>
+        ) : null}
       </header>
 
       {!loading && !error ? (
@@ -635,6 +628,7 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
             <option value="todos">Todos</option>
             <option value="AA">AA</option>
             <option value="E">Eléctrico</option>
+            <option value="GG">GG</option>
             <option value="HG">HG</option>
           </select>
         </label>
@@ -1009,9 +1003,16 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
         </table>
         {!loading && filtrados.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-            {tab === "sin_historial"
-              ? "No hay preventivos sin OT vinculada ni historial de cierre con estos filtros."
-              : "No hay preventivos con estos filtros."}
+            {avisos.length > 0
+              ? `Ninguno de los ${avisos.length} preventivos cargados coincide con los filtros activos (pestaña, especialidad, frecuencia, semana en programa…). Probá «Todos» en cada selector.`
+              : tab === "sin_historial"
+                ? "No hay preventivos sin OT vinculada ni historial de cierre con estos filtros."
+                : "No hay preventivos con estos filtros."}
+          </p>
+        ) : null}
+        {!loading && filtrados.length > 0 && filtrados.length < avisos.length ? (
+          <p className="border-t border-border px-4 py-2 text-center text-xs text-muted-foreground">
+            Mostrando {filtrados.length} de {avisos.length} preventivos (filtros activos).
           </p>
         ) : null}
       </div>

@@ -1120,7 +1120,9 @@ export function useAvisosVencimientos(input: {
         (snap) => {
           if (cancelled) return;
           const hoy = new Date();
-          const list: AvisoConVencimiento[] = snap.docs.map((d) => {
+          const list: AvisoConVencimiento[] = snap.docs
+            .filter((d) => (d.data() as Aviso).tipo === "PREVENTIVO")
+            .map((d) => {
             const row = d.data() as Aviso;
             const data: Aviso = { ...row, id: d.id };
             let diasLive = data.dias_para_vencimiento;
@@ -1355,7 +1357,9 @@ export function useAvisosPreventivosMT(input: {
         q,
         (snap) => {
           if (cancelled) return;
-          const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Aviso);
+          const list = snap.docs
+            .filter((d) => (d.data() as Aviso).tipo === "PREVENTIVO")
+            .map((d) => ({ id: d.id, ...d.data() }) as Aviso);
           list.sort((a, b) => (a.n_aviso || "").localeCompare(b.n_aviso || ""));
           setAvisos(list);
           setLoading(false);

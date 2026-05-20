@@ -49,10 +49,8 @@ function assetHaystack(a: Asset): string {
 
 const ESPECIALIDADES: (EspecialidadActivo | "")[] = ["", "AA", "ELECTRICO", "GG", "HG"];
 
-/** Primera carga de la lista (menos lecturas en Firestore). */
-const ACTIVOS_LISTA_INICIAL = 200;
-/** Tope de documentos por consulta en esta pantalla. */
-const ACTIVOS_LISTA_MAX = 500;
+/** Tope de documentos por consulta en esta pantalla (carga inicial = tope). */
+const ACTIVOS_LISTA_LIMIT = 500;
 
 export default function ActivosPage() {
   const { puede } = usePermisos();
@@ -63,10 +61,8 @@ export default function ActivosPage() {
   const [ubicacionContains, setUbicacionContains] = useState("");
   const [operativo, setOperativo] = useState<"all" | "yes" | "no">("all");
   const [especialidad, setEspecialidad] = useState<"" | EspecialidadActivo>("");
-  const [listLimit, setListLimit] = useState(ACTIVOS_LISTA_INICIAL);
-
   // Pasar centro y especialidad al hook para filtrar en Firestore y evitar el corte del limit.
-  const { assets, loading, error } = useAssetsLive(listLimit, {
+  const { assets, loading, error } = useAssetsLive(ACTIVOS_LISTA_LIMIT, {
     centro: centro || null,
     especialidad: especialidad || null,
   });
@@ -286,28 +282,9 @@ export default function ActivosPage() {
               </li>
             ))}
           </ul>
-          {!loading &&
-          !error &&
-          assets.length > 0 &&
-          assets.length === listLimit &&
-          listLimit < ACTIVOS_LISTA_MAX ? (
-            <div className="flex justify-center border-t border-border/80 pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                className="min-w-[180px]"
-                onClick={() => setListLimit(ACTIVOS_LISTA_MAX)}
-              >
-                Mostrar más (hasta {ACTIVOS_LISTA_MAX})
-              </Button>
-            </div>
-          ) : null}
-          {!loading &&
-          !error &&
-          listLimit >= ACTIVOS_LISTA_MAX &&
-          assets.length >= ACTIVOS_LISTA_MAX ? (
+          {!loading && !error && assets.length >= ACTIVOS_LISTA_LIMIT ? (
             <p className="border-t border-border/80 pt-3 text-center text-xs text-muted">
-              Se muestran hasta {ACTIVOS_LISTA_MAX} activos en esta vista. Para acotar, usá filtros o la búsqueda.
+              Se muestran hasta {ACTIVOS_LISTA_LIMIT} activos en esta vista. Para acotar, usá filtros o la búsqueda.
             </p>
           ) : null}
         </CardContent>

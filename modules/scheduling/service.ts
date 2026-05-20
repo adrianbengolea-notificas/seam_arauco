@@ -1,6 +1,7 @@
 import { getAdminDb } from "@/firebase/firebaseAdmin";
 import { AppError } from "@/lib/errors/app-error";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { FieldValue } from "firebase-admin/firestore";
 import { propuestaSemanaDocId } from "@/lib/scheduling/propuesta-id";
 import {
   appendAvisoToProgramaSemanaAdmin,
@@ -19,7 +20,13 @@ import {
   replaceWeeklyPlanRowsAdmin,
   updateWeeklyPlanRowAdmin,
 } from "@/modules/scheduling/repository";
-import type { AvisoSlot, DiaSemanaPrograma, EspecialidadPrograma, WeeklyPlanRow } from "@/modules/scheduling/types";
+import type {
+  AvisoSlot,
+  DiaSemanaPrograma,
+  EspecialidadPrograma,
+  SlotSemanal,
+  WeeklyPlanRow,
+} from "@/modules/scheduling/types";
 import { toPermisoRol } from "@/lib/permisos/index";
 import { usuarioTieneCentro } from "@/modules/users/centros-usuario";
 import { diaIsoSemanaADiaPrograma, parseIsoWeekIdFromSemanaParam } from "@/modules/scheduling/iso-week";
@@ -299,7 +306,56 @@ function especialidadAAvisoToPrograma(esp: Especialidad): EspecialidadPrograma {
   return "GG";
 }
 
-/** Publica un aviso en `programa_semanal` y marca `incluido_en_semana`. */
+function localidadProgramaDesdeInput(localidad: string | undefined, aviso: { ubicacion_tecnica: string; centro: string }): string {
+  return (localidad?.trim() || aviso.ubicacion_tecnica || aviso.centro || "").trim() || "—";
+}
+
+function findAvisoUbicacionEnSlots(
+  slots: SlotSemanal[] | undefined,
+  avisoNumero: string,
+  avisoFirestoreId: string,
+): { localidad: string; dia: DiaSemanaPrograma; especialidad: EspecialidadPrograma } | null {
+  for (const slot of slots ?? []) {
+    for (const a of slot.avisos ?? []) {
+      const match =
+        a.numero === avisoNumero ||
+        Boolean(avisoFirestoreId && a.avisoFirestoreId?.trim() === avisoFirestoreId);
+      if (match) {
+        return {
+          localidad: slot.localidad,
+          dia: slot.dia,
+          especialidad: slot.especialidad,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function buildAvisoSlotDesdeAviso(aviso: {
+  id: string;
+  n_aviso: string;
+  texto_corto: string;
+  tipo: TipoAviso;
+  urgente?: boolean;
+  ubicacion_tecnica: string;
+  antecesor_orden_abierta?: { work_order_id?: string | null } | null;
+}): AvisoSlot {
+  return {
+    numero: aviso.n_aviso,
+    descripcion: aviso.texto_corto || aviso.n_aviso,
+    tipo:
+      aviso.tipo === "CORRECTIVO" || aviso.tipo === "EMERGENCIA" ? "correctivo" : "preventivo",
+    urgente: aviso.urgente === true,
+    ubicacion: aviso.ubicacion_tecnica,
+    avisoFirestoreId: aviso.id,
+    ...(aviso.antecesor_orden_abierta?.work_order_id?.trim()
+      ? { ordenPreviaPendiente: true }
+      : {}),
+  };
+}
+
+/** Publica un aviso en `programa_semanal` y marca `incluido_en_semana`. Si ya estaba en la semana, lo mueve al día indicado. */
 export async function addAvisoToPublishedPrograma(input: {
   semanaId: string;
   avisoFirestoreId: string;
@@ -315,24 +371,34 @@ export async function addAvisoToPublishedPrograma(input: {
   if (rol !== "superadmin" && !usuarioTieneCentro(input.session, aviso.centro)) {
     throw new AppError("FORBIDDEN", "El aviso pertenece a otro centro");
   }
-  if (aviso.incluido_en_semana === input.semanaId) {
-    throw new AppError("CONFLICT", "Este aviso ya figura incluido en esta semana");
-  }
   const espProg = especialidadAAvisoToPrograma(aviso.especialidad);
-  const loc =
-    (input.localidad?.trim() || aviso.ubicacion_tecnica || aviso.centro || "").trim() || "—";
-  const nuevoAviso: AvisoSlot = {
-    numero: aviso.n_aviso,
-    descripcion: aviso.texto_corto || aviso.n_aviso,
-    tipo:
-      aviso.tipo === "CORRECTIVO" || aviso.tipo === "EMERGENCIA" ? "correctivo" : "preventivo",
-    urgente: aviso.urgente === true,
-    ubicacion: aviso.ubicacion_tecnica,
-    avisoFirestoreId: aviso.id,
-    ...(aviso.antecesor_orden_abierta?.work_order_id?.trim()
-      ? { ordenPreviaPendiente: true }
-      : {}),
-  };
+  const loc = localidadProgramaDesdeInput(input.localidad, aviso);
+  const programaDocId = propuestaSemanaDocId(aviso.centro, input.semanaId);
+  const programa = await getProgramaSemana(programaDocId);
+  const ubicEnGrilla = findAvisoUbicacionEnSlots(programa?.slots, aviso.n_aviso, aviso.id);
+
+  if (ubicEnGrilla) {
+    const mismaCelda =
+      ubicEnGrilla.dia === input.dia &&
+      (ubicEnGrilla.localidad.trim() || "—") === loc &&
+      ubicEnGrilla.especialidad === espProg;
+    if (mismaCelda) {
+      await updateAviso(aviso.id, { incluido_en_semana: input.semanaId });
+      return;
+    }
+    await moveAvisoInPublishedPrograma({
+      session: input.session,
+      sourceProgramaDocId: programaDocId,
+      destProgramaDocId: programaDocId,
+      avisoNumero: aviso.n_aviso,
+      avisoFirestoreId: aviso.id,
+      from: ubicEnGrilla,
+      destDia: input.dia,
+    });
+    return;
+  }
+
+  const nuevoAviso = buildAvisoSlotDesdeAviso(aviso);
   await appendAvisoToProgramaSemanaAdmin({
     semanaId: input.semanaId,
     centro: aviso.centro,
@@ -401,4 +467,92 @@ export async function moveAvisoInPublishedPrograma(input: {
     from: input.from,
     destDia: input.destDia,
   });
+}
+
+/**
+ * Quita un aviso/tarea de la grilla publicada `programa_semanal` sin borrar el documento en `avisos`.
+ * Limpia `incluido_en_semana` cuando corresponde y desagenda la OT en `weekly_schedule` si existía slot.
+ */
+export async function removeAvisoFromPublishedPrograma(input: {
+  session: UserProfileWithUid;
+  programaDocId: string;
+  avisoNumero: string;
+  avisoFirestoreId?: string | null;
+  workOrderId?: string | null;
+  from: {
+    localidad: string;
+    dia: DiaSemanaPrograma;
+    especialidad: EspecialidadPrograma;
+  };
+}): Promise<void> {
+  const programa = await getProgramaSemana(input.programaDocId.trim());
+  if (!programa) {
+    throw new AppError("NOT_FOUND", "Programa no encontrado");
+  }
+  const rol = toPermisoRol(input.session.rol);
+  if (rol !== "superadmin") {
+    throw new AppError("FORBIDDEN", "Solo el súper administrador puede quitar tareas del programa semanal");
+  }
+
+  const semanaIso = parseIsoWeekIdFromSemanaParam(input.programaDocId);
+  const avisoNumero = input.avisoNumero.trim();
+  const avisoFirestoreId = input.avisoFirestoreId?.trim() || undefined;
+  const workOrderId = input.workOrderId?.trim() || undefined;
+
+  const locFrom = (input.from.localidad ?? "").trim() || "—";
+  let encontrado = false;
+  for (const slot of programa.slots ?? []) {
+    if (slot.dia !== input.from.dia || slot.especialidad !== input.from.especialidad) continue;
+    const slotLoc = (slot.localidad?.trim() || "—");
+    if (slotLoc !== locFrom) continue;
+    for (const a of slot.avisos ?? []) {
+      if (a.numero !== avisoNumero) continue;
+      const fid = a.avisoFirestoreId?.trim();
+      const want = avisoFirestoreId;
+      if (want && fid && fid !== want) continue;
+      encontrado = true;
+      break;
+    }
+    if (encontrado) break;
+  }
+  if (!encontrado) {
+    throw new AppError(
+      "VALIDATION",
+      "No se encontró la tarea en esa celda del programa. Actualizá la página.",
+    );
+  }
+
+  await removeAvisoFromProgramaSemanaAdmin({
+    programaDocId: input.programaDocId.trim(),
+    localidad: input.from.localidad,
+    dia: input.from.dia,
+    especialidad: input.from.especialidad,
+    avisoNumero,
+    avisoFirestoreId,
+  });
+
+  if (avisoFirestoreId) {
+    const aviso = await getAvisoById(avisoFirestoreId);
+    if (aviso && (!semanaIso || String(aviso.incluido_en_semana ?? "").trim() === semanaIso)) {
+      await getAdminDb()
+        .collection(COLLECTIONS.avisos)
+        .doc(avisoFirestoreId)
+        .update({
+          incluido_en_semana: FieldValue.delete(),
+          updated_at: FieldValue.serverTimestamp(),
+        } as Record<string, unknown>);
+    }
+  }
+
+  if (semanaIso && workOrderId) {
+    const snap = await getAdminDb()
+      .collection(COLLECTIONS.weekly_schedule)
+      .doc(semanaIso)
+      .collection("slots")
+      .where("work_order_id", "==", workOrderId)
+      .get();
+    for (const doc of snap.docs) {
+      await deleteWeeklySlotAdmin(semanaIso, doc.id);
+    }
+  }
 }

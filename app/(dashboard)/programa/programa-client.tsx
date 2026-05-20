@@ -1,7 +1,11 @@
 "use client";
 
-import { actionMoveAvisoEnProgramaPublicado } from "@/app/actions/schedule";
+import {
+  actionMoveAvisoEnProgramaPublicado,
+  actionRemoveAvisoFromProgramaPublicado,
+} from "@/app/actions/schedule";
 import { actionArchiveWorkOrder } from "@/app/actions/work-orders";
+import { ProgramaSeccionNav } from "@/app/(dashboard)/programa/programa-seccion-nav";
 import { ProgramaSemanalClient } from "@/app/programa-semanal/programa-semanal-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,7 +55,8 @@ import type {
 import { tienePermiso, type Rol } from "@/lib/permisos";
 import { usePermisos } from "@/lib/permisos/usePermisos";
 import { getClientIdToken, useAuth } from "@/modules/users/hooks";
-import { GripVertical, X } from "lucide-react";
+import { exportarProgramaSemanalExcel } from "@/lib/export/programa-semanal-excel";
+import { GripVertical, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -131,15 +136,64 @@ function idDocumentoDesdeParamSemana(semanas: SemanaOpcion[], param: string | nu
   return semanas.find((s) => SUFIJO_ISO_EN_ID_SEMANA.exec(s.id)?.[1] === iso)?.id ?? null;
 }
 
+/** Semana ISO del día de hoy según el calendario (no la más reciente en Firestore). */
+function semanaIsoHoy(): string {
+  return getIsoWeekId(new Date());
+}
+
+function semanaDocIdEnLista(semanas: SemanaOpcion[], iso: string): string | null {
+  const match = semanas.find((s) => s.id === iso || SUFIJO_ISO_EN_ID_SEMANA.exec(s.id)?.[1] === iso);
+  return match?.id ?? null;
+}
+
+/** Inserta la semana ISO de hoy si falta, manteniendo orden descendente (más reciente primero). */
+function semanasSelectorConHoyOrdenadas<T>(
+  lista: T[],
+  hoyIso: string,
+  hoyItem: T,
+  isoDe: (item: T) => string,
+): T[] {
+  if (lista.some((s) => isoDe(s) === hoyIso)) return lista;
+  return [...lista, hoyItem].sort((a, b) => isoDe(b).localeCompare(isoDe(a)));
+}
+
 /**
- * Id de documento `programa_semanal` válido para la lista de semanas de la planta actual.
- * Si `param` es de otra planta (p. ej. `PC01_2026-W18` con planta PF01), se toma el doc de la misma ISO en esta planta.
+ * Id de documento `programa_semanal` a mostrar por defecto o desde `?semana=`.
+ * Por defecto: semana ISO actual del calendario, aunque aún no esté publicada.
  */
-function idDocumentoParaPlantaLista(semanas: SemanaOpcion[], param: string | null | undefined): string | null {
-  if (!semanas.length) return null;
-  const fromParam = idDocumentoDesdeParamSemana(semanas, param);
-  if (fromParam) return fromParam;
-  return semanas[0]!.id;
+function resolverSemanaDocIdPlanta(
+  centro: string,
+  semanas: SemanaOpcion[],
+  param: string | null | undefined,
+): string {
+  const c = centro.trim();
+  const hoyIso = semanaIsoHoy();
+  if (param?.trim()) {
+    const fromList = idDocumentoDesdeParamSemana(semanas, param);
+    if (fromList) return fromList;
+    const iso = parseIsoWeekIdFromSemanaParam(param);
+    if (iso && c && isCentroInKnownList(c)) return propuestaSemanaDocId(c, iso);
+    if (iso) return iso;
+  }
+  const enLista = semanaDocIdEnLista(semanas, hoyIso);
+  if (enLista) return enLista;
+  if (c && isCentroInKnownList(c)) return propuestaSemanaDocId(c, hoyIso);
+  return hoyIso;
+}
+
+/** Semana ISO por defecto en vista «todas las plantas» (calendario actual si no hay `?semana=`). */
+function resolverSemanaIsoTodasPlantas(
+  merged: MergedSemanaOpcion[],
+  param: string | null | undefined,
+): string {
+  const hoyIso = semanaIsoHoy();
+  if (param?.trim()) {
+    const desdeUrl = idIsoDesdeParamSemanaTodas(merged, param);
+    if (desdeUrl) return desdeUrl;
+    const iso = parseIsoWeekIdFromSemanaParam(param);
+    if (iso) return iso;
+  }
+  return hoyIso;
 }
 
 /** Alineado con la ventana hacia adelante de órdenes programadas en `useSemanasDisponibles`. */
@@ -826,6 +880,8 @@ function AvisoDrawer({
   const [moverMsg, setMoverMsg] = useState<{ tipo: "ok" | "err"; texto: string } | null>(null);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [archiveMsg, setArchiveMsg] = useState<{ tipo: "ok" | "err"; texto: string } | null>(null);
+  const [quitarBusy, setQuitarBusy] = useState(false);
+  const [quitarMsg, setQuitarMsg] = useState<{ tipo: "ok" | "err"; texto: string } | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -840,6 +896,8 @@ function AvisoDrawer({
     setDestDiaSeleccionado(estado.slot.dia);
     setMoverMsg(null);
     setMoverBusy(false);
+    setQuitarMsg(null);
+    setQuitarBusy(false);
   }, [estado, programaDocSeleccionActual]);
 
   const avisoDocId = estado.aviso.avisoFirestoreId?.trim() || undefined;
@@ -887,6 +945,52 @@ function AvisoDrawer({
       });
     } finally {
       setMoverBusy(false);
+    }
+  }
+
+  async function onQuitarDelProgramaSemanal() {
+    if (
+      !window.confirm(
+        "¿Quitar esta tarea del programa semanal? El aviso de mantenimiento no se borra; solo deja de figurar en la grilla.",
+      )
+    ) {
+      return;
+    }
+    setQuitarMsg(null);
+    setQuitarBusy(true);
+    try {
+      const tok = await getClientIdToken();
+      if (!tok) {
+        setQuitarMsg({ tipo: "err", texto: "No hay sesión. Volvé a iniciar sesión." });
+        return;
+      }
+      const res = await actionRemoveAvisoFromProgramaPublicado(tok, {
+        programaDocId: estado.programaDocId.trim(),
+        avisoNumero: estado.aviso.numero.trim(),
+        avisoFirestoreId: estado.aviso.avisoFirestoreId?.trim() || undefined,
+        workOrderId:
+          ordenServicioExistenteId?.trim() ||
+          estado.aviso.workOrderId?.trim() ||
+          undefined,
+        from: {
+          localidad: localidadCeldaFirestoreParaServidor(estado.slot),
+          dia: estado.slot.dia,
+          especialidad: estado.slot.especialidad,
+        },
+      });
+      if (!res.ok) {
+        setQuitarMsg({ tipo: "err", texto: res.error.message });
+        return;
+      }
+      setQuitarMsg({ tipo: "ok", texto: "Tarea quitada del programa semanal." });
+      onClose();
+    } catch (err) {
+      setQuitarMsg({
+        tipo: "err",
+        texto: err instanceof Error ? err.message : "No se pudo quitar del programa",
+      });
+    } finally {
+      setQuitarBusy(false);
     }
   }
 
@@ -1063,6 +1167,37 @@ function AvisoDrawer({
             </Button>
           </form>
         ) : null}
+        {esSuperadmin ? (
+          <div className="space-y-2 border-t border-border px-4 py-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Quitar del programa
+            </p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Solo súper administrador. La tarea desaparece de la grilla semanal; el aviso en mantenimiento sigue
+              existiendo y podés volver a programarlo más adelante.
+            </p>
+            {quitarMsg?.tipo === "err" ? (
+              <p className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+                {quitarMsg.texto}
+              </p>
+            ) : null}
+            {quitarMsg?.tipo === "ok" ? (
+              <p className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1.5 text-xs text-emerald-900 dark:text-emerald-100">
+                {quitarMsg.texto}
+              </p>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full border-destructive/50 text-destructive hover:bg-destructive/10"
+              disabled={quitarBusy || moverBusy || archiveBusy}
+              onClick={() => void onQuitarDelProgramaSemanal()}
+            >
+              <Trash2 className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+              {quitarBusy ? "Quitando…" : "Quitar del programa semanal"}
+            </Button>
+          </div>
+        ) : null}
         {puedeCrearOt && esSuperadmin && ordenServicioExistenteId ? (
           <div className="space-y-2 border-t border-border px-4 py-4">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Archivo</p>
@@ -1143,22 +1278,25 @@ export function ProgramaClient() {
     if (!viewerEligeAlcanceMultiPlanta) return perfilCentro;
     if (centroParam === CENTRO_SELECTOR_TODAS_PLANTAS) return CENTRO_SELECTOR_TODAS_PLANTAS;
     if (centroParam && isCentroInKnownList(centroParam)) return centroParam;
-    if (esCliente || rol === "admin" || rol === "supervisor") return CENTRO_SELECTOR_TODAS_PLANTAS;
-    return perfilCentro;
-  }, [viewerEligeAlcanceMultiPlanta, perfilCentro, centroParam, esCliente, rol]);
+    return CENTRO_SELECTOR_TODAS_PLANTAS;
+  }, [viewerEligeAlcanceMultiPlanta, perfilCentro, centroParam]);
 
   const vistaTodasPlantas = centroEfectivo === CENTRO_SELECTOR_TODAS_PLANTAS;
 
   const onCentroSuperadminChange = useCallback(
     (nextCentro: string) => {
       const p = new URLSearchParams(searchParams.toString());
-      if (nextCentro === perfilCentro) p.delete("centro");
-      else if (nextCentro === CENTRO_SELECTOR_TODAS_PLANTAS) p.set("centro", CENTRO_SELECTOR_TODAS_PLANTAS);
-      else p.set("centro", nextCentro);
+      if (nextCentro === CENTRO_SELECTOR_TODAS_PLANTAS) {
+        p.set("centro", CENTRO_SELECTOR_TODAS_PLANTAS);
+      } else if (isCentroInKnownList(nextCentro)) {
+        p.set("centro", nextCentro);
+      } else {
+        p.delete("centro");
+      }
       const q = p.toString();
       void router.push(q ? `/programa?${q}` : "/programa", { scroll: false });
     },
-    [router, searchParams, perfilCentro],
+    [router, searchParams],
   );
 
   const puedeLeerMotorPropuestasEnSemanas = tienePermiso(
@@ -1201,6 +1339,27 @@ export function ProgramaClient() {
   const semanasError = vistaTodasPlantas ? semanasErrorTodas : semanasErrorSingle;
   const semanasActivas = vistaTodasPlantas ? semanasTodas : semanasSingle;
 
+  /** Selector: siempre incluye la semana ISO del calendario (hoy), aunque no haya plan publicado aún. */
+  const semanasParaSelector = useMemo(() => {
+    const hoyIso = semanaIsoHoy();
+    if (vistaTodasPlantas) {
+      return semanasSelectorConHoyOrdenadas(
+        semanasTodas,
+        hoyIso,
+        { iso: hoyIso, label: semanaLabelDesdeIso(hoyIso), programaDocIdPorCentro: {} },
+        (s) => s.iso,
+      );
+    }
+    const c = centroEfectivo.trim();
+    if (!c || c === CENTRO_SELECTOR_TODAS_PLANTAS || !isCentroInKnownList(c)) return semanasSingle;
+    return semanasSelectorConHoyOrdenadas(
+      semanasSingle,
+      hoyIso,
+      { id: propuestaSemanaDocId(c, hoyIso), label: semanaLabelDesdeIso(hoyIso) },
+      (s) => parseIsoWeekIdFromSemanaParam(s.id) ?? s.id,
+    );
+  }, [vistaTodasPlantas, semanasTodas, semanasSingle, centroEfectivo]);
+
   const semanasParaReprogramarDrawer = useMemo(() => {
     if (vistaTodasPlantas) {
       const c = drawerCentroParaSemanas;
@@ -1221,31 +1380,15 @@ export function ProgramaClient() {
   const [localidadTab, setLocalidadTab] = useState<string | null>(null);
 
   const semanaId = useMemo(() => {
-    if (!semanasActivas.length) return "";
     if (vistaTodasPlantas) {
-      const list = semanasTodas;
-      if (semanaIdElegida && list.some((s) => s.iso === semanaIdElegida)) return semanaIdElegida;
-      if (urlSemana?.trim()) {
-        const desdeUrl = idIsoDesdeParamSemanaTodas(list, urlSemana);
-        if (desdeUrl) return desdeUrl;
-      }
-      const hoyIso = getIsoWeekId(new Date());
-      const matchHoy = list.find((s) => s.iso === hoyIso);
-      if (matchHoy) return matchHoy.iso;
-      return list[0]!.iso;
+      if (semanaIdElegida && semanasTodas.some((s) => s.iso === semanaIdElegida)) return semanaIdElegida;
+      return resolverSemanaIsoTodasPlantas(semanasTodas, urlSemana);
     }
+    const c = centroEfectivo.trim();
+    if (!c || c === CENTRO_SELECTOR_TODAS_PLANTAS) return "";
     if (semanaIdElegida && semanasSingle.some((s) => s.id === semanaIdElegida)) return semanaIdElegida;
-    if (urlSemana?.trim()) {
-      const desdeUrlParaEstaPlanta = idDocumentoParaPlantaLista(semanasSingle, urlSemana);
-      if (desdeUrlParaEstaPlanta) return desdeUrlParaEstaPlanta;
-    }
-    const hoyIso = getIsoWeekId(new Date());
-    const matchHoy = semanasSingle.find(
-      (s) => s.id === hoyIso || SUFIJO_ISO_EN_ID_SEMANA.exec(s.id)?.[1] === hoyIso,
-    );
-    if (matchHoy) return matchHoy.id;
-    return semanasSingle[0]!.id;
-  }, [semanasActivas.length, vistaTodasPlantas, semanasTodas, semanasSingle, semanaIdElegida, urlSemana]);
+    return resolverSemanaDocIdPlanta(c, semanasSingle, urlSemana);
+  }, [vistaTodasPlantas, semanasTodas, semanasSingle, semanaIdElegida, urlSemana, centroEfectivo]);
 
   const semanaIso = useMemo(
     () => (semanaId ? parseIsoWeekIdFromSemanaParam(semanaId) : null),
@@ -1289,7 +1432,7 @@ export function ProgramaClient() {
       return;
     }
     if (semanasSingle.some((s) => s.id === sem)) return;
-    const resolved = idDocumentoParaPlantaLista(semanasSingle, sem);
+    const resolved = resolverSemanaDocIdPlanta(centroEfectivo, semanasSingle, sem);
     if (!resolved || resolved === sem) return;
     const p = new URLSearchParams(searchParams.toString());
     p.set("semana", resolved);
@@ -1525,6 +1668,17 @@ export function ProgramaClient() {
   }, [esCliente, vistaOperativo, puedePlanOperativo, setVistaPublicada]);
 
   const cerrarDrawer = useCallback(() => setDrawer(null), []);
+
+  const [exportandoExcel, setExportandoExcel] = useState(false);
+  const onExportarExcel = useCallback(async () => {
+    if (!programaParaGrilla || exportandoExcel) return;
+    setExportandoExcel(true);
+    try {
+      await exportarProgramaSemanalExcel(programaParaGrilla);
+    } finally {
+      setExportandoExcel(false);
+    }
+  }, [programaParaGrilla, exportandoExcel]);
 
   const [dndBusy, setDndBusy] = useState(false);
   const [dndFlashMsg, setDndFlashMsg] = useState<string | null>(null);
@@ -1861,6 +2015,8 @@ export function ProgramaClient() {
         ) : null}
       </header>
 
+      {!esCliente ? <ProgramaSeccionNav vistaActual="grilla" /> : null}
+
       {puedeCrearOt && !esCliente && tienePendientesPropuesta ? (
         <div
           className={
@@ -2022,16 +2178,16 @@ export function ProgramaClient() {
             className="rounded-lg border border-border bg-background px-3 py-2 text-sm font-normal text-foreground shadow-sm"
             value={semanaId}
             onChange={onSemanaPublicaChange}
-            disabled={semanasLoading || !semanasActivas.length}
+            disabled={semanasLoading}
           >
-            {!semanasActivas.length ? <option value="">— Sin semanas —</option> : null}
+            {!semanasParaSelector.length ? <option value="">— Sin semanas —</option> : null}
             {vistaTodasPlantas
-              ? semanasTodas.map((s) => (
+              ? semanasParaSelector.map((s) => (
                   <option key={s.iso} value={s.iso}>
                     {s.label}
                   </option>
                 ))
-              : semanasSingle.map((s) => (
+              : semanasParaSelector.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.label}
                   </option>
@@ -2097,6 +2253,21 @@ export function ProgramaClient() {
           </select>
         </label>
       </section>
+
+      {programaParaGrilla ? (
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={exportandoExcel}
+            onClick={onExportarExcel}
+            className="gap-2 text-xs"
+          >
+            {exportandoExcel ? "Generando…" : "Exportar Excel"}
+          </Button>
+        </div>
+      ) : null}
 
       {puedeMoverEnProgramaPublicado && filtroDia !== "todos" ? (
         <p className="rounded-lg border border-amber-200/60 bg-amber-50/50 px-3 py-2 text-xs leading-relaxed text-amber-950 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100">

@@ -255,6 +255,8 @@ export async function createWorkOrderFromAviso(input: {
     await setPlanIncluidoOtPendiente(aviso.id, id);
   }
 
+  await autoProgramarOtManualEnSemanaIso(id);
+
   return id;
 }
 

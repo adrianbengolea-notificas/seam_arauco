@@ -34,6 +34,19 @@ function pathMatches(href: string, pathname: string | null): boolean {
     if (pathname === "/activos/escaner" || pathname.startsWith("/activos/escaner/")) return false;
     return pathname === "/activos" || pathname.startsWith("/activos/");
   }
+  if (href === "/programa") {
+    return (
+      pathname === "/programa" ||
+      (Boolean(pathname?.startsWith("/programa/")) &&
+        !pathname!.startsWith("/programa/correctivos") &&
+        !pathname!.startsWith("/programa/aprobacion") &&
+        !pathname!.startsWith("/programa/preventivos") &&
+        !pathname!.startsWith("/programa/vencimientos") &&
+        !pathname!.startsWith("/programa/anual") &&
+        !pathname!.startsWith("/programa/cargar") &&
+        !pathname!.startsWith("/programa/seguimiento"))
+    );
+  }
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -132,6 +145,14 @@ export function AppSidebar({ mobileOpen, onNavigate }: AppSidebarProps) {
               </Link>
             );
           })}
+          {puede("programa:crear_ot") || puede("programa:editar") ? (
+            <Link
+              href="/programa/correctivos"
+              className={itemClass(Boolean(pathname?.startsWith("/programa/correctivos")))}
+            >
+              Correctivos
+            </Link>
+          ) : null}
           {(puede("programa:ver_calendario_anual") || puede("programa:ver_vencimientos_sa")) ? (
             <Link
               href="/programa/preventivos"

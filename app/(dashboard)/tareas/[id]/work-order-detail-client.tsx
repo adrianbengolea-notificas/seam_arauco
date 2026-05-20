@@ -57,6 +57,7 @@ import { getClientIdToken, useAuthUser } from "@/modules/users/hooks";
 import { Download } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { getIsoWeekId } from "@/modules/scheduling/iso-week";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { WorkOrderComentariosSection } from "@/app/(dashboard)/tareas/[id]/work-order-comentarios";
 import { useAvisoLive } from "@/modules/notices/hooks";
@@ -608,6 +609,40 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
               {pendingCount !== 1 ? "s" : ""} de sincronizar — reconectate para enviarlos.
             </span>
           ) : null}
+        </div>
+      ) : null}
+      {subtipoWo === "correctivo" && workOrder.centro?.trim() ? (
+        <div
+          className="rounded-xl border border-brand/30 bg-brand/5 px-4 py-3 text-sm leading-relaxed text-foreground"
+          role="note"
+        >
+          <p className="font-medium">Programa semanal</p>
+          <p className="mt-1 text-muted-foreground">
+            Esta OT debería figurar en el calendario de la semana de su fecha de realización. Si no la ves, revisá la
+            fecha programada o ubicá el aviso desde correctivos.
+          </p>
+          <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            <Link
+              href={(() => {
+                const fp = workOrder.fecha_inicio_programada;
+                let sem = getIsoWeekId(new Date());
+                if (fp != null && typeof (fp as { toDate?: () => Date }).toDate === "function") {
+                  const d = (fp as { toDate: () => Date }).toDate();
+                  if (!Number.isNaN(d.getTime())) sem = getIsoWeekId(d);
+                }
+                const p = new URLSearchParams();
+                p.set("centro", workOrder.centro.trim());
+                p.set("semana", sem);
+                return `/programa?${p.toString()}`;
+              })()}
+              className="font-medium text-primary underline underline-offset-2"
+            >
+              Ver en programa semanal
+            </Link>
+            <Link href="/programa/correctivos" className="font-medium text-primary underline underline-offset-2">
+              Correctivos (Excel)
+            </Link>
+          </p>
         </div>
       ) : null}
       <div className="space-y-3">

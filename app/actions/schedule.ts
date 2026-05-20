@@ -6,7 +6,11 @@ import { AppError, isAppError } from "@/lib/errors/app-error";
 import { getAdminDb } from "@/firebase/firebaseAdmin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import type { OtPropuestaFirestore, PropuestaSemanaFirestore } from "@/lib/firestore/plan-mantenimiento-types";
-import { requireAnyPermisoFromToken, requirePermisoFromToken } from "@/lib/permisos/server";
+import {
+  requireAnyPermisoFromToken,
+  requirePermisoFromToken,
+  requireVerifiedProfileFromToken,
+} from "@/lib/permisos/server";
 import { toPermisoRol } from "@/lib/permisos/index";
 import { centrosEfectivosDelUsuario, usuarioTieneCentro } from "@/modules/users/centros-usuario";
 import type { UserProfileWithUid } from "@/modules/users/repository";
@@ -16,6 +20,7 @@ import {
   addAvisoToPublishedPrograma,
   moveAvisoInPublishedPrograma,
   moveWeekSlotBetweenDays,
+  removeAvisoFromPublishedPrograma,
   removeWeekSlot,
   scheduleWorkOrderInWeek,
 } from "@/modules/scheduling/service";
@@ -169,6 +174,40 @@ const moverAvisoProgramaPublicadoSchema = z.object({
     especialidad: z.enum(["Aire", "Electrico", "GG"]),
   }),
 });
+
+const quitarAvisoProgramaPublicadoSchema = z.object({
+  programaDocId: z.string().min(1),
+  avisoNumero: z.string().min(1),
+  avisoFirestoreId: z.string().optional(),
+  workOrderId: z.string().optional(),
+  from: z.object({
+    localidad: z.string(),
+    dia: diaProgramaEnum,
+    especialidad: z.enum(["Aire", "Electrico", "GG"]),
+  }),
+});
+
+/** Quita una tarea de la grilla publicada sin borrar el aviso en mantenimiento. Solo súper administrador. */
+export async function actionRemoveAvisoFromProgramaPublicado(
+  idToken: string,
+  input: z.infer<typeof quitarAvisoProgramaPublicadoSchema>,
+): Promise<ActionResult<void>> {
+  return wrap(async () => {
+    const session = await requireVerifiedProfileFromToken(idToken);
+    if (toPermisoRol(session.rol) !== "superadmin") {
+      throw new AppError("FORBIDDEN", "Solo el súper administrador puede quitar tareas del programa semanal");
+    }
+    const parsed = quitarAvisoProgramaPublicadoSchema.parse(input);
+    await removeAvisoFromPublishedPrograma({
+      session,
+      programaDocId: parsed.programaDocId.trim(),
+      avisoNumero: parsed.avisoNumero.trim(),
+      avisoFirestoreId: parsed.avisoFirestoreId?.trim() ? parsed.avisoFirestoreId.trim() : undefined,
+      workOrderId: parsed.workOrderId?.trim() ? parsed.workOrderId.trim() : undefined,
+      from: parsed.from,
+    });
+  });
+}
 
 /** Mueve un aviso a otro día y/u otra semana en la grilla publicada `programa_semanal`. */
 export async function actionMoveAvisoEnProgramaPublicado(

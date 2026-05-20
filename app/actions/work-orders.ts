@@ -354,6 +354,17 @@ const createWorkOrderSchema = z
         path: ["asset_id"],
       });
     }
+
+    if (data.sub_tipo === "correctivo") {
+      const f = String(data.fecha_inicio_programada ?? "").trim();
+      if (!f) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Indicá la fecha de realización para ubicar el correctivo en el programa semanal.",
+          path: ["fecha_inicio_programada"],
+        });
+      }
+    }
   });
 
 export async function createWorkOrder(

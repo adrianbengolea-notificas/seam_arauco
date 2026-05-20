@@ -21,6 +21,7 @@ import type { Especialidad } from "@/modules/notices/types";
 import { getClientIdToken, useAuthUser, useUserProfile } from "@/modules/users/hooks";
 import { isSuperAdminRole } from "@/modules/users/roles";
 import { cn } from "@/lib/utils";
+import { ProgramaSeccionNav } from "@/app/(dashboard)/programa/programa-seccion-nav";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -520,6 +521,7 @@ export function AprobacionPropuestaClient() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
+      <ProgramaSeccionNav />
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-foreground">Aprobación de propuesta semanal</h1>

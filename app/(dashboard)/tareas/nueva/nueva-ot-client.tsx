@@ -23,8 +23,10 @@ import {
   query,
   where,
 } from "firebase/firestore";
+import { getIsoWeekId } from "@/modules/scheduling/iso-week";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { format } from "date-fns";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /** Badge M/T/S/A para el formulario: solo si el aviso lo trae o la frecuencia lo permite (evita “M” por defecto en UNICA, etc.). */
@@ -51,6 +53,61 @@ async function fetchAvisoByIdOrNumero(db: ReturnType<typeof getFirebaseDb>, para
   if (snap.empty) return null;
   const d = snap.docs[0]!;
   return { id: d.id, ...(d.data() as Omit<Aviso, "id">) };
+}
+
+/** Búsqueda de avisos: por número SAP (global) o por texto (por planta si el usuario no es superadmin). */
+async function searchAvisosParaOt(
+  db: ReturnType<typeof getFirebaseDb>,
+  trimmed: string,
+  opts: { esSuperadmin: boolean; centroPerfil: string },
+): Promise<Aviso[]> {
+  const centroFiltro = opts.esSuperadmin ? "" : opts.centroPerfil.trim();
+
+  if (/^\d+$/.test(trimmed)) {
+    if (trimmed.length < 2) return [];
+    let rows: Aviso[] = [];
+    if (trimmed.length >= 5) {
+      const snap = await getDocs(
+        query(collection(db, "avisos"), where("n_aviso", "==", trimmed), limit(12)),
+      );
+      rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Aviso, "id">) }));
+    } else {
+      const snap = await getDocs(
+        query(
+          collection(db, "avisos"),
+          where("n_aviso", ">=", trimmed),
+          where("n_aviso", "<=", trimmed + "\uf8ff"),
+          limit(15),
+        ),
+      );
+      rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Aviso, "id">) }));
+    }
+    if (centroFiltro) {
+      rows = rows.filter((x) => (x.centro ?? "").trim() === centroFiltro);
+    }
+    return rows.slice(0, 12);
+  }
+
+  const needle = trimmed.toLowerCase();
+  const centrosToSearch = centroFiltro ? [centroFiltro] : [...KNOWN_CENTROS];
+  const batches = await Promise.all(
+    centrosToSearch.map((c) =>
+      getDocs(query(collection(db, "avisos"), where("centro", "==", c), limit(40))),
+    ),
+  );
+  const merged: Aviso[] = [];
+  for (const snap of batches) {
+    for (const d of snap.docs) {
+      merged.push({ id: d.id, ...(d.data() as Omit<Aviso, "id">) });
+    }
+  }
+  return merged
+    .filter(
+      (x) =>
+        x.n_aviso.toLowerCase().includes(needle) ||
+        (x.texto_corto ?? "").toLowerCase().includes(needle),
+    )
+    .slice(0, 12);
 }
 
 const ESP_OPTS: { value: Especialidad; label: string }[] = [
@@ -146,6 +203,13 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
       setActivoManualDescripcion("");
       setFrecBadge(frecuenciaPlanMtsaDesdeAviso(a));
       setAvisoHits([]);
+      const fp = a.fecha_programada;
+      if (fp != null && typeof (fp as { toDate?: () => Date }).toDate === "function") {
+        const d = (fp as { toDate: () => Date }).toDate();
+        if (!Number.isNaN(d.getTime())) {
+          setFechaProg(format(d, "yyyy-MM-dd"));
+        }
+      }
     },
     [esSuperadmin],
   );
@@ -186,27 +250,10 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
       }
       void (async () => {
         const db = getFirebaseDb();
-        let filtered: Aviso[] = [];
-        if (/^\d+$/.test(trimmed) && trimmed.length >= 5) {
-          const qNum = query(collection(db, "avisos"), where("n_aviso", "==", trimmed), limit(8));
-          const snap = await getDocs(qNum);
-          if (cancelled) return;
-          const all = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Aviso, "id">) }));
-          filtered = all.filter((x) => (x.centro ?? "").trim() === centro.trim());
-        } else {
-          const q = query(collection(db, "avisos"), where("centro", "==", centro), limit(40));
-          const snap = await getDocs(q);
-          if (cancelled) return;
-          const all = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Aviso, "id">) }));
-          const needle = trimmed.toLowerCase();
-          filtered = all
-            .filter(
-              (x) =>
-                x.n_aviso.toLowerCase().includes(needle) ||
-                (x.texto_corto ?? "").toLowerCase().includes(needle),
-            )
-            .slice(0, 12);
-        }
+        const filtered = await searchAvisosParaOt(db, trimmed, {
+          esSuperadmin,
+          centroPerfil: profileCentro,
+        });
         if (cancelled) return;
         setAvisoHits(filtered);
         const exact = filtered.find((h) => h.n_aviso === trimmed);
@@ -219,7 +266,7 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
       cancelled = true;
       clearTimeout(t);
     };
-  }, [avisoQuery, centro, applyAviso]);
+  }, [avisoQuery, esSuperadmin, profileCentro, applyAviso]);
 
   const { asset: assetDocPorId, loading: assetDocLoading } = useAssetLive(
     assetId.trim() && assetId !== ASSET_OTRO_FUERA_CATALOGO ? assetId.trim() : undefined,
@@ -298,6 +345,10 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
         setMsg("Preventivo: vinculá un aviso desde el buscador o ingresá el número de aviso.");
         return;
       }
+      if (subTipo === "correctivo" && !fechaProg.trim()) {
+        setMsg("Indicá la fecha de realización para ubicar el correctivo en el programa semanal.");
+        return;
+      }
       const res = await createWorkOrder(token, {
         centro,
         asset_id: esOtroCorrectivo ? "" : assetId.trim(),
@@ -317,6 +368,14 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
       });
       if (!res.ok) {
         setMsg(res.error.message);
+        return;
+      }
+      if (subTipo === "correctivo" && fechaProg.trim()) {
+        const d = new Date(`${fechaProg.trim()}T12:00:00`);
+        const p = new URLSearchParams();
+        p.set("centro", centro.trim());
+        p.set("semana", getIsoWeekId(d));
+        window.location.href = `/programa?${p.toString()}`;
         return;
       }
       window.location.href = `/tareas/${res.data.id}`;
@@ -345,36 +404,16 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
             <> · planta <span className="font-medium">{nombreCentro(centro)}</span></>
           )}
           .{" "}
-          <strong>Preventivo</strong>: obligatorio vincular un aviso (buscador) o informar número de aviso.{" "}
-          <strong>Preventivo</strong>: obligatorio vincular un aviso (buscador) o informar número de aviso y elegir{" "}
-          <strong className="text-foreground">un activo del listado</strong>.{" "}
+          <strong>Preventivo</strong>: empezá por el número de aviso; al vincularlo se completa la planta y el resto.{" "}
+          Elegí <strong className="text-foreground">un activo del listado</strong>.{" "}
           <strong>Correctivo</strong>: si el equipo no está cargado como activo, elegí «Otro (fuera del listado)» y describilo;
           provisional: podés omitir aviso SAP si corresponde; completá equipo y descripción.
         </p>
       </div>
 
       <form onSubmit={(e) => void onSubmit(e)} className="space-y-4">
-        {esSuperadmin ? (
-          <div className="space-y-1">
-            <label className="text-sm font-medium">Centro</label>
-            <select
-              className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-              value={centro}
-              onChange={(e) => {
-                setCentroSeleccionado(e.target.value);
-              }}
-            >
-              {KNOWN_CENTROS.map((c) => (
-                <option key={c} value={c}>
-                  {nombreCentro(c)}
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : null}
-
         <div className="space-y-1">
-          <label className="text-sm font-medium">Aviso (búsqueda)</label>
+          <label className="text-sm font-medium">Nº de aviso</label>
           <Input
             value={avisoQuery}
             onChange={(e) => {
@@ -387,8 +426,9 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
                 setFrecBadge("");
               }
             }}
-            placeholder="Nº aviso o texto…"
+            placeholder="Ej: 100123456 — filtra mientras escribís"
             autoComplete="off"
+            autoFocus
           />
           {avisoId ? (
             <div className="rounded-lg border border-border bg-muted/50 px-3 py-2.5 text-sm shadow-sm">
@@ -418,7 +458,10 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
                     onClick={() => applyAviso(hit)}
                   >
                     <span className="font-mono font-semibold">{hit.n_aviso}</span>
-                    <span className="ml-2 text-muted-foreground">
+                    <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+                      {nombreCentro(hit.centro ?? "")}
+                    </span>
+                    <span className="mt-0.5 block text-muted-foreground sm:mt-0 sm:ml-2 sm:inline">
                       {(hit.texto_corto ?? "").slice(0, 72)}
                       {(hit.texto_corto ?? "").length > 72 ? "…" : ""}
                     </span>
@@ -429,10 +472,34 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
           ) : null}
           <p className="text-xs text-muted-foreground">
             {avisoId
-              ? `Vinculado: ${avisoNumeroDispl || avisoId}`
-              : "Sin aviso vinculado — tocá un resultado de la lista o ingresá el número SAP completo (se vincula solo al coincidir)."}
+              ? `Vinculado: ${avisoNumeroDispl || avisoId} · planta ${nombreCentro(centro)}`
+              : "Escribí el número SAP (mín. 2 dígitos) o texto del aviso; al coincidir exacto se vincula solo. La planta se define al elegir el aviso."}
           </p>
         </div>
+
+        {esSuperadmin ? (
+          <div className="space-y-1">
+            <label className="text-sm font-medium">Centro (planta)</label>
+            <select
+              className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              value={centro}
+              onChange={(e) => {
+                setCentroSeleccionado(e.target.value);
+              }}
+            >
+              {KNOWN_CENTROS.map((c) => (
+                <option key={c} value={c}>
+                  {nombreCentro(c)}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              {avisoId
+                ? "Completado desde el aviso vinculado; podés cambiarlo si hace falta."
+                : "Si aún no hay aviso, elegí la planta manualmente; al vincular un aviso se actualiza sola."}
+            </p>
+          </div>
+        ) : null}
 
         {/* Número de aviso: se llena automáticamente al elegir un aviso del buscador.
             Solo mostrar como campo editable si no hay aviso vinculado (referencia manual). */}
@@ -595,10 +662,24 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
         </div>
 
         <div className="space-y-1">
-          <label className="text-sm font-medium">Fecha programada <span className="text-muted-foreground font-normal">(opcional)</span></label>
-          <Input type="date" value={fechaProg} onChange={(e) => setFechaProg(e.target.value)} />
+          <label className="text-sm font-medium">
+            Fecha de realización{" "}
+            {subTipo === "correctivo" ? (
+              <span className="text-destructive font-normal">*</span>
+            ) : (
+              <span className="text-muted-foreground font-normal">(opcional)</span>
+            )}
+          </label>
+          <Input
+            type="date"
+            required={subTipo === "correctivo"}
+            value={fechaProg}
+            onChange={(e) => setFechaProg(e.target.value)}
+          />
           <p className="text-xs text-muted-foreground">
-            Definí en qué semana ISO y día cae en el programa. Si la dejás vacía, se agenda en la semana actual según la fecha de hoy.
+            {subTipo === "correctivo"
+              ? "Obligatoria: define el día y la semana ISO donde aparece en el programa publicado."
+              : "Si la indicás, se usa para ubicar la OT en el calendario semanal."}
           </p>
         </div>
 

@@ -4,6 +4,7 @@ import { planillaItemKey } from "@/lib/planillas/item-key";
 import { formatFirestoreDate } from "@/lib/pdf/format-firestore-date";
 import type { PlanillaRespuesta, PlanillaTemplate, SeccionTemplate } from "@/lib/firestore/types";
 import { planillaFirmaResponsableSrc, planillaFirmaUsuarioSrc } from "@/lib/planillas/form-utils";
+import { workOrderNumeroOperativo } from "@/modules/work-orders/n-ot-from-aviso";
 import type { WorkOrder } from "@/modules/work-orders/types";
 
 const s = StyleSheet.create({
@@ -56,7 +57,7 @@ export function PlanillaPDFSection({
         <Text style={{ fontSize: 9 }}>{template.nombre}</Text>
       </View>
       <Text style={s.sub}>
-        OT n.º {workOrder.n_ot} · Aviso {workOrder.aviso_numero ?? workOrder.aviso_id ?? "—"} ·{" "}
+        Orden n.º {workOrderNumeroOperativo(workOrder)} ·{" "}
         {workOrder.ubicacion_tecnica} · {formatFirestoreDate(workOrder.created_at)}
       </Text>
       {respuesta.equipoCodigo ? (

@@ -21,6 +21,20 @@ export function isoDiaSemanaDesdeDateLocal(d: Date): 1 | 2 | 3 | 4 | 5 | 6 | 7 {
   return n as 1 | 2 | 3 | 4 | 5 | 6 | 7;
 }
 
+/** Celda de la grilla publicada → `dia_semana` de agenda ISO (1 = lunes … 7 = domingo). */
+export function diaProgramaADiaIsoSemana(dia: DiaSemanaPrograma): 1 | 2 | 3 | 4 | 5 | 6 | 7 {
+  const map: Record<DiaSemanaPrograma, 1 | 2 | 3 | 4 | 5 | 6 | 7> = {
+    lunes: 1,
+    martes: 2,
+    miercoles: 3,
+    jueves: 4,
+    viernes: 5,
+    sabado: 6,
+    domingo: 7,
+  };
+  return map[dia];
+}
+
 /** `dia_semana` de agenda ISO 1 = lunes … 7 = domingo → celda de la grilla publicada. */
 export function diaIsoSemanaADiaPrograma(diaSemana: number): DiaSemanaPrograma {
   const orden: DiaSemanaPrograma[] = [

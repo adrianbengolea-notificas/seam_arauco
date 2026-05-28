@@ -12,6 +12,8 @@ import { toPermisoRol } from "@/lib/permisos/index";
 import { requireAnyPermisoFromToken, requirePermisoFromToken, requireVerifiedProfileFromToken } from "@/lib/permisos/server";
 import { usuarioTieneCentro } from "@/modules/users/centros-usuario";
 import { listUserProfilesFiltered } from "@/modules/users/repository";
+import type { EspecialidadPrograma } from "@/modules/scheduling/types";
+import { ESPECIALIDADES_PROGRAMA } from "@/modules/scheduling/types";
 import type { FirmaDigital } from "@/modules/work-orders/types";
 import {
   addMaterialOtField,
@@ -59,7 +61,7 @@ export async function actionArchiveWorkOrder(
       programaDocId: string;
       localidad: string;
       dia: "lunes" | "martes" | "miercoles" | "jueves" | "viernes" | "sabado" | "domingo";
-      especialidad: "Aire" | "Electrico" | "GG";
+      especialidad: EspecialidadPrograma;
       avisoNumero: string;
       avisoFirestoreId?: string;
     };
@@ -78,7 +80,7 @@ export async function actionArchiveWorkOrder(
         "sabado",
         "domingo",
       ]),
-      especialidad: z.enum(["Aire", "Electrico", "GG"]),
+      especialidad: z.enum(ESPECIALIDADES_PROGRAMA),
       avisoNumero: z.string().min(1),
       avisoFirestoreId: z.string().optional(),
     })

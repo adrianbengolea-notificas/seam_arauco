@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { HelpIconTooltip } from "@/components/ui/help-icon-tooltip";
+import { Input } from "@/components/ui/input";
 import {
   CENTRO_SELECTOR_TODAS_PLANTAS,
   DEFAULT_CENTRO,
@@ -45,6 +46,12 @@ import {
   semanaLabelDesdeIso,
   shiftIsoWeekId,
 } from "@/modules/scheduling/iso-week";
+import {
+  ESPECIALIDADES_PROGRAMA_FILTRO,
+  especialidadesOtSemanasTecnico,
+  especialidadesProgramaVisiblesTecnico,
+  etiquetaEspecialidadPrograma,
+} from "@/modules/scheduling/especialidad-programa";
 import type {
   AvisoSlot,
   DiaSemanaPrograma,
@@ -56,7 +63,7 @@ import { tienePermiso, type Rol } from "@/lib/permisos";
 import { usePermisos } from "@/lib/permisos/usePermisos";
 import { getClientIdToken, useAuth } from "@/modules/users/hooks";
 import { exportarProgramaSemanalExcel } from "@/lib/export/programa-semanal-excel";
-import { Trash2, X } from "lucide-react";
+import { Search, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -253,6 +260,19 @@ function idIsoDesdeParamSemanaTodas(merged: MergedSemanaOpcion[], param: string 
   return null;
 }
 
+/** Al cambiar planta, adapta `?semana=` (ISO en «todas», `{centro}_{ISO}` en planta única). */
+function normalizarSemanaParamAlCambiarCentro(
+  semanaActual: string | null | undefined,
+  nextCentro: string,
+): string | null {
+  if (!semanaActual?.trim()) return null;
+  const iso = parseIsoWeekIdFromSemanaParam(semanaActual);
+  if (!iso) return semanaActual.trim();
+  if (nextCentro === CENTRO_SELECTOR_TODAS_PLANTAS) return iso;
+  if (isCentroInKnownList(nextCentro)) return propuestaSemanaDocId(nextCentro, iso);
+  return iso;
+}
+
 type FiltroEspecialidad = EspecialidadPrograma | "todos";
 type FiltroDia = DiaSemanaPrograma | "todos";
 type FiltroTipo = "todos" | "correctivo" | "urgente";
@@ -289,6 +309,46 @@ function avisoPasaFiltros(a: AvisoSlot, tipo: FiltroTipo): boolean {
   return avisoPasaTipo(a, tipo);
 }
 
+type ContextoBusquedaAvisoPrograma = {
+  localidad?: string;
+  denomUbicTecnica?: string;
+  especialidad?: EspecialidadPrograma;
+};
+
+function textoBusquedaAvisoEnPrograma(a: AvisoSlot, ctx?: ContextoBusquedaAvisoPrograma): string {
+  const esp =
+    ctx?.especialidad === "Electrico"
+      ? "electrico eléctrico"
+      : ctx?.especialidad === "Aire"
+        ? "aire"
+        : ctx?.especialidad === "GG"
+          ? "gg"
+          : ctx?.especialidad === "HG"
+            ? "hg hidrogrua hidrogrúa"
+            : "";
+  return [
+    a.numero,
+    a.descripcion,
+    a.equipoCodigo,
+    a.ubicacion,
+    ctx?.localidad,
+    ctx?.denomUbicTecnica,
+    esp,
+  ]
+    .filter((x) => typeof x === "string" && x.trim())
+    .join(" ")
+    .toLowerCase();
+}
+
+function avisoPasaBusqueda(a: AvisoSlot, busqueda: string, ctx?: ContextoBusquedaAvisoPrograma): boolean {
+  const q = busqueda.trim().toLowerCase();
+  if (!q) return true;
+  if (textoBusquedaAvisoEnPrograma(a, ctx).includes(q)) return true;
+  const qNum = q.replace(/\s/g, "");
+  const num = a.numero.replace(/\s/g, "").toLowerCase();
+  return Boolean(qNum && num.includes(qNum));
+}
+
 type CeldaAvisoPrograma = { aviso: AvisoSlot; especialidad: EspecialidadPrograma; programaDocId?: string };
 
 function etiquetaLocalidadEnPrograma(localidadClave: string, todosSlots: SlotSemanal[] | undefined): string {
@@ -297,7 +357,7 @@ function etiquetaLocalidadEnPrograma(localidadClave: string, todosSlots: SlotSem
 }
 
 function etiquetaEspecialidadEnChip(esp: EspecialidadPrograma): string {
-  return esp === "Electrico" ? "Eléctrico" : esp;
+  return etiquetaEspecialidadPrograma(esp);
 }
 
 /** Progresión de intensidad: cuanto más avanzada la orden, más saturado el chip (excepto anulada = rojo). */
@@ -380,7 +440,7 @@ function LeyendaColoresProgramaSemanal() {
       <p className="mb-2 font-semibold text-foreground">Leyenda: estado operativo</p>
       <p className="mb-2 text-muted-foreground">
         Los colores del chip indican <strong className="text-foreground">en qué etapa está la orden</strong>. La{" "}
-        <strong className="text-foreground">especialidad</strong> (Aire, Eléctrico, GG) se lee en la{" "}
+        <strong className="text-foreground">especialidad</strong> (Aire, Eléctrico, GG, Hidrogrúa) se lee en la{" "}
         <strong className="text-foreground">primera línea</strong> de cada chip.{" "}
         <strong className="text-foreground">A mayor avance hacia el cierre</strong>, el tono se vuelve más intenso.
       </p>
@@ -505,6 +565,25 @@ function categoriaEstadoOperativoChip(
   return "abierta_borrador";
 }
 
+type FiltroVistaTecnico = {
+  especialidadesPrograma: EspecialidadPrograma[];
+};
+
+/** Técnico: solo chips con OT abierta legible (propias o pool sin asignar). */
+function avisoVisibleOrdenAbiertaTecnico(
+  a: AvisoSlot,
+  workOrderIdPorAvisoDocId: Map<string, string>,
+  estadosPorId: Map<string, WorkOrderEstado>,
+  loadingEstados: boolean,
+): boolean {
+  const ordenId = ordenServicioIdEfectivaEnPrograma(a, workOrderIdPorAvisoDocId)?.trim();
+  if (!ordenId) return false;
+  if (loadingEstados) return true;
+  const estado = estadosPorId.get(ordenId);
+  if (!estado) return false;
+  return estado !== "CERRADA" && estado !== "ANULADA";
+}
+
 function avisoVisibleEnGrilla(
   a: AvisoSlot,
   tipo: FiltroTipo,
@@ -512,7 +591,14 @@ function avisoVisibleEnGrilla(
   workOrderIdPorAvisoDocId: Map<string, string>,
   estadosPorId: Map<string, WorkOrderEstado>,
   loadingEstados: boolean,
+  filtroVistaTecnico?: FiltroVistaTecnico,
+  busqueda?: string,
+  ctxBusqueda?: ContextoBusquedaAvisoPrograma,
 ): boolean {
+  if (filtroVistaTecnico && !avisoVisibleOrdenAbiertaTecnico(a, workOrderIdPorAvisoDocId, estadosPorId, loadingEstados)) {
+    return false;
+  }
+  if (!avisoPasaBusqueda(a, busqueda ?? "", ctxBusqueda)) return false;
   if (!avisoPasaFiltros(a, tipo)) return false;
   if (filtroEstado === "orden_previa_pendiente") return Boolean(a.ordenPreviaPendiente);
   if (filtroEstado === "todos") return true;
@@ -534,19 +620,33 @@ function slotsFiltrados(
   workOrderIdPorAvisoDocId: Map<string, string>,
   estadosPorId: Map<string, WorkOrderEstado>,
   loadingEstados: boolean,
-  /** Perfil técnico: solo slots con `tecnicoSugeridoUid` igual al usuario logueado. */
-  soloAsignadoAUid?: string,
+  filtroVistaTecnico?: FiltroVistaTecnico,
+  busqueda?: string,
 ): SlotSemanal[] {
   if (!programa?.slots?.length) return [];
   return programa.slots.filter((s) => {
-    if (soloAsignadoAUid) {
-      const uidSlot = s.tecnicoSugeridoUid?.trim();
-      if (uidSlot !== soloAsignadoAUid) return false;
+    if (filtroVistaTecnico && !filtroVistaTecnico.especialidadesPrograma.includes(s.especialidad)) {
+      return false;
     }
     if (esp !== "todos" && s.especialidad !== esp) return false;
     if (dia !== "todos" && s.dia !== dia) return false;
+    const ctxBusqueda: ContextoBusquedaAvisoPrograma = {
+      localidad: s.localidad,
+      denomUbicTecnica: s.denomUbicTecnica,
+      especialidad: s.especialidad,
+    };
     const avisosOk = (s.avisos ?? []).filter((a) =>
-      avisoVisibleEnGrilla(a, tipo, filtroEstado, workOrderIdPorAvisoDocId, estadosPorId, loadingEstados),
+      avisoVisibleEnGrilla(
+        a,
+        tipo,
+        filtroEstado,
+        workOrderIdPorAvisoDocId,
+        estadosPorId,
+        loadingEstados,
+        filtroVistaTecnico,
+        busqueda,
+        ctxBusqueda,
+      ),
     );
     return avisosOk.length > 0;
   });
@@ -559,13 +659,30 @@ function celdasPorLocalidad(
   workOrderIdPorAvisoDocId: Map<string, string>,
   estadosPorId: Map<string, WorkOrderEstado>,
   loadingEstados: boolean,
+  filtroVistaTecnico?: FiltroVistaTecnico,
+  busqueda?: string,
 ): Map<string, Map<DiaSemanaPrograma, CeldaAvisoPrograma[]>> {
   const out = new Map<string, Map<DiaSemanaPrograma, CeldaAvisoPrograma[]>>();
 
   for (const slot of slots) {
     const loc = slot.localidad?.trim() || "—";
+    const ctxBusqueda: ContextoBusquedaAvisoPrograma = {
+      localidad: slot.localidad,
+      denomUbicTecnica: slot.denomUbicTecnica,
+      especialidad: slot.especialidad,
+    };
     const avisos = (slot.avisos ?? []).filter((a) =>
-      avisoVisibleEnGrilla(a, tipo, filtroEstado, workOrderIdPorAvisoDocId, estadosPorId, loadingEstados),
+      avisoVisibleEnGrilla(
+        a,
+        tipo,
+        filtroEstado,
+        workOrderIdPorAvisoDocId,
+        estadosPorId,
+        loadingEstados,
+        filtroVistaTecnico,
+        busqueda,
+        ctxBusqueda,
+      ),
     );
     if (!avisos.length) continue;
 
@@ -1071,7 +1188,7 @@ function AvisoDrawer({
             <p className="mt-1 font-mono text-xs text-muted-foreground">N.º {aviso.numero}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               {etiquetaLocalidadSlot(slot.localidad, slot.denomUbicTecnica)} ·{" "}
-              {slot.especialidad === "Electrico" ? "Eléctrico" : slot.especialidad} · {DIA_LABEL_LARGO[slot.dia]}
+              {etiquetaEspecialidadPrograma(slot.especialidad)} · {DIA_LABEL_LARGO[slot.dia]}
             </p>
           </div>
           <Button type="button" variant="ghost" size="sm" className="h-9 w-9 shrink-0 p-0" onClick={onClose}>
@@ -1095,7 +1212,7 @@ function AvisoDrawer({
                     href={`/tareas/${antecesor.work_order_id}`}
                     className="font-semibold underline underline-offset-2"
                   >
-                    Ir a orden (ref. {antecesor.n_ot}, aviso {antecesor.n_aviso})
+                    Ir a orden n.º {antecesor.n_aviso || antecesor.n_ot}
                   </Link>
                 </p>
               ) : null}
@@ -1274,7 +1391,17 @@ export function ProgramaClient() {
   const { puede, rol } = usePermisos();
   const esCliente = rol === "cliente_arauco";
   const esRolTecnico = rol === "tecnico";
-  const uidSoloProgramaAsignado = esRolTecnico ? user?.uid : undefined;
+  const especialidadesProgramaTecnico = useMemo((): EspecialidadPrograma[] => {
+    if (!esRolTecnico) return [];
+    return especialidadesProgramaVisiblesTecnico(profile?.especialidades);
+  }, [esRolTecnico, profile?.especialidades]);
+  const filtroVistaTecnico = useMemo(
+    () =>
+      esRolTecnico && especialidadesProgramaTecnico.length
+        ? { especialidadesPrograma: especialidadesProgramaTecnico }
+        : undefined,
+    [esRolTecnico, especialidadesProgramaTecnico],
+  );
   const perfilCentro = (profile?.centro?.trim() || DEFAULT_CENTRO).trim();
   const viewerSuperadmin = isSuperAdminRole(profile?.rol);
   /** Selector «Planta / Todas las plantas» en programa publicado (lectura multi-planta). */
@@ -1282,34 +1409,52 @@ export function ProgramaClient() {
     viewerSuperadmin || esCliente || rol === "admin" || rol === "supervisor";
   const centroParam = searchParams.get("centro")?.trim() ?? "";
 
-  const centroEfectivo = useMemo(() => {
+  const centroDesdeUrl = useMemo(() => {
     if (!viewerEligeAlcanceMultiPlanta) return perfilCentro;
     if (centroParam === CENTRO_SELECTOR_TODAS_PLANTAS) return CENTRO_SELECTOR_TODAS_PLANTAS;
     if (centroParam && isCentroInKnownList(centroParam)) return centroParam;
     return CENTRO_SELECTOR_TODAS_PLANTAS;
   }, [viewerEligeAlcanceMultiPlanta, perfilCentro, centroParam]);
 
+  const [centroSelectorOptimista, setCentroSelectorOptimista] = useState<string | null>(null);
+
+  const centroEfectivo = useMemo(
+    () => centroSelectorOptimista ?? centroDesdeUrl,
+    [centroSelectorOptimista, centroDesdeUrl],
+  );
+
   const vistaTodasPlantas = centroEfectivo === CENTRO_SELECTOR_TODAS_PLANTAS;
 
-  const onCentroSuperadminChange = useCallback(
-    (nextCentro: string) => {
-      const p = new URLSearchParams(searchParams.toString());
-      if (nextCentro === CENTRO_SELECTOR_TODAS_PLANTAS) {
-        p.set("centro", CENTRO_SELECTOR_TODAS_PLANTAS);
-      } else if (isCentroInKnownList(nextCentro)) {
-        p.set("centro", nextCentro);
-      } else {
-        p.delete("centro");
-      }
-      const q = p.toString();
-      void router.push(q ? `/programa?${q}` : "/programa", { scroll: false });
-    },
-    [router, searchParams],
-  );
+  useEffect(() => {
+    if (centroSelectorOptimista !== null && centroDesdeUrl === centroSelectorOptimista) {
+      setCentroSelectorOptimista(null);
+    }
+  }, [centroSelectorOptimista, centroDesdeUrl]);
+
+  /** Default explícito en URL para roles multi-planta (evita heredar `?centro=PC01` implícito). */
+  useEffect(() => {
+    if (authLoading || !viewerEligeAlcanceMultiPlanta) return;
+    if (centroParam) return;
+    const p = new URLSearchParams(searchParams.toString());
+    p.set("centro", CENTRO_SELECTOR_TODAS_PLANTAS);
+    const q = p.toString();
+    void router.replace(q ? `/programa?${q}` : "/programa", { scroll: false });
+  }, [authLoading, viewerEligeAlcanceMultiPlanta, centroParam, router, searchParams]);
 
   const puedeLeerMotorPropuestasEnSemanas = tienePermiso(
     (profile?.rol as Rol) ?? "tecnico",
     "ot:ver_todas",
+  );
+
+  const opcionesSemanasDisponibles = useMemo(
+    () => ({
+      incluirOtProgramadasSemana: true as const,
+      incluirPropuestasMotorSemana: puedeLeerMotorPropuestasEnSemanas,
+      ...(esRolTecnico && profile?.especialidades?.length
+        ? { otSemanasSoloEspecialidades: especialidadesOtSemanasTecnico(profile.especialidades) }
+        : {}),
+    }),
+    [esRolTecnico, profile?.especialidades, puedeLeerMotorPropuestasEnSemanas],
   );
 
   const [drawer, setDrawer] = useState<DrawerState>(null);
@@ -1324,40 +1469,37 @@ export function ProgramaClient() {
   const { semanas: semanasSingle, loading: semanasLoadingSingle, error: semanasErrorSingle } = useSemanasDisponibles(
     vistaTodasPlantas ? undefined : centroEfectivo,
     user?.uid,
-    {
-      incluirOtProgramadasSemana: true,
-      incluirPropuestasMotorSemana: puedeLeerMotorPropuestasEnSemanas,
-    },
+    opcionesSemanasDisponibles,
   );
 
   const { semanas: semanasTodas, loading: semanasLoadingTodas, error: semanasErrorTodas } = useSemanasDisponiblesTodas(
     vistaTodasPlantas ? user?.uid : undefined,
-    {
-      incluirOtProgramadasSemana: true,
-      incluirPropuestasMotorSemana: vistaTodasPlantas ? puedeLeerMotorPropuestasEnSemanas : false,
-    },
+    opcionesSemanasDisponibles,
   );
 
-  const { semanas: semanasDrawerAlcance } = useSemanasDisponibles(drawerCentroParaSemanas, user?.uid, {
-    incluirOtProgramadasSemana: true,
-    incluirPropuestasMotorSemana: puedeLeerMotorPropuestasEnSemanas,
-  });
+  const { semanas: semanasDrawerAlcance } = useSemanasDisponibles(
+    drawerCentroParaSemanas,
+    user?.uid,
+    opcionesSemanasDisponibles,
+  );
 
   const semanasLoading = vistaTodasPlantas ? semanasLoadingTodas : semanasLoadingSingle;
   const semanasError = vistaTodasPlantas ? semanasErrorTodas : semanasErrorSingle;
   const semanasActivas = vistaTodasPlantas ? semanasTodas : semanasSingle;
 
   /** Selector: siempre incluye la semana ISO del calendario (hoy), aunque no haya plan publicado aún. */
-  const semanasParaSelector = useMemo(() => {
+  const semanasParaSelectorMerged = useMemo((): MergedSemanaOpcion[] => {
     const hoyIso = semanaIsoHoy();
-    if (vistaTodasPlantas) {
-      return semanasSelectorConHoyOrdenadas(
-        semanasTodas,
-        hoyIso,
-        { iso: hoyIso, label: semanaLabelDesdeIso(hoyIso), programaDocIdPorCentro: {} },
-        (s) => s.iso,
-      );
-    }
+    return semanasSelectorConHoyOrdenadas(
+      semanasTodas,
+      hoyIso,
+      { iso: hoyIso, label: semanaLabelDesdeIso(hoyIso), programaDocIdPorCentro: {} },
+      (s) => s.iso,
+    );
+  }, [semanasTodas]);
+
+  const semanasParaSelectorSingle = useMemo((): SemanaOpcion[] => {
+    const hoyIso = semanaIsoHoy();
     const c = centroEfectivo.trim();
     if (!c || c === CENTRO_SELECTOR_TODAS_PLANTAS || !isCentroInKnownList(c)) return semanasSingle;
     return semanasSelectorConHoyOrdenadas(
@@ -1366,7 +1508,7 @@ export function ProgramaClient() {
       { id: propuestaSemanaDocId(c, hoyIso), label: semanaLabelDesdeIso(hoyIso) },
       (s) => parseIsoWeekIdFromSemanaParam(s.id) ?? s.id,
     );
-  }, [vistaTodasPlantas, semanasTodas, semanasSingle, centroEfectivo]);
+  }, [semanasSingle, centroEfectivo]);
 
   const semanasParaReprogramarDrawer = useMemo(() => {
     if (vistaTodasPlantas) {
@@ -1385,6 +1527,7 @@ export function ProgramaClient() {
   const [filtroDia, setFiltroDia] = useState<FiltroDia>("todos");
   const [filtroTipo, setFiltroTipo] = useState<FiltroTipo>("todos");
   const [filtroEstadoOperativo, setFiltroEstadoOperativo] = useState<FiltroEstadoOperativo>("todos");
+  const [busqueda, setBusqueda] = useState("");
   const [localidadTab, setLocalidadTab] = useState<string | null>(null);
 
   const semanaId = useMemo(() => {
@@ -1414,39 +1557,63 @@ export function ProgramaClient() {
     if (id) setSemanaIdElegida(id);
   }, [semanasActivas.length, urlSemana, vistaTodasPlantas, semanasTodas, semanasSingle]);
 
-  /** Cambiar planta invalida una semana guardada sólo como id de otro centro. */
+  /** Cambiar planta (URL o selector) invalida semana elegida en memoria. */
   useEffect(() => {
     setSemanaIdElegida(null);
-  }, [centroEfectivo]);
+  }, [centroDesdeUrl]);
 
-  /**
-   * Si la URL trae ?semana=id de otra planta (p. ej. PC01_* con planta PF01), realinea al documento correcto en esta lista.
-   */
-  useEffect(() => {
-    if (!semanasActivas.length) return;
-    const sem = searchParams.get("semana")?.trim();
-    if (!sem) return;
-    if (vistaTodasPlantas) {
-      const ok =
-        semanasTodas.some((s) => s.iso === sem) ||
-        semanasTodas.some((s) => Object.values(s.programaDocIdPorCentro).includes(sem));
-      if (ok) return;
-      const resolved = idIsoDesdeParamSemanaTodas(semanasTodas, sem);
-      if (!resolved || resolved === sem) return;
+  const onCentroSuperadminChange = useCallback(
+    (nextCentro: string) => {
+      const centroValido =
+        nextCentro === CENTRO_SELECTOR_TODAS_PLANTAS
+          ? CENTRO_SELECTOR_TODAS_PLANTAS
+          : isCentroInKnownList(nextCentro)
+            ? nextCentro
+            : CENTRO_SELECTOR_TODAS_PLANTAS;
+
+      setCentroSelectorOptimista(centroValido);
+      setSemanaIdElegida(null);
+
       const p = new URLSearchParams(searchParams.toString());
-      p.set("semana", resolved);
+      p.set("centro", centroValido);
+
+      const semNorm = normalizarSemanaParamAlCambiarCentro(p.get("semana"), centroValido);
+      if (semNorm) p.set("semana", semNorm);
+
+      p.delete("vista");
       const q = p.toString();
       void router.replace(q ? `/programa?${q}` : "/programa", { scroll: false });
-      return;
+    },
+    [router, searchParams],
+  );
+
+  /**
+   * Si la URL trae ?semana= incompatible con la planta (p. ej. PC01_* con PF01), calcula el reemplazo una sola vez.
+   */
+  const semanaUrlReemplazo = useMemo(() => {
+    if (!semanasActivas.length || !urlSemana) return null;
+    if (vistaTodasPlantas) {
+      const ok =
+        semanasTodas.some((s) => s.iso === urlSemana) ||
+        semanasTodas.some((s) => Object.values(s.programaDocIdPorCentro).includes(urlSemana));
+      if (ok) return null;
+      const resolved = idIsoDesdeParamSemanaTodas(semanasTodas, urlSemana);
+      if (!resolved || resolved === urlSemana) return null;
+      return resolved;
     }
-    if (semanasSingle.some((s) => s.id === sem)) return;
-    const resolved = resolverSemanaDocIdPlanta(centroEfectivo, semanasSingle, sem);
-    if (!resolved || resolved === sem) return;
+    if (semanasSingle.some((s) => s.id === urlSemana)) return null;
+    const resolved = resolverSemanaDocIdPlanta(centroEfectivo, semanasSingle, urlSemana);
+    if (!resolved || resolved === urlSemana) return null;
+    return resolved;
+  }, [semanasActivas.length, urlSemana, vistaTodasPlantas, centroEfectivo, semanasTodas, semanasSingle]);
+
+  useEffect(() => {
+    if (!semanaUrlReemplazo) return;
     const p = new URLSearchParams(searchParams.toString());
-    p.set("semana", resolved);
+    p.set("semana", semanaUrlReemplazo);
     const q = p.toString();
     void router.replace(q ? `/programa?${q}` : "/programa", { scroll: false });
-  }, [router, searchParams, semanasActivas.length, vistaTodasPlantas, semanasTodas, semanasSingle]);
+  }, [semanaUrlReemplazo, router, searchParams]);
 
   const hrefProgramaPublicada = useMemo(() => {
     const p = new URLSearchParams(searchParams.toString());
@@ -1596,7 +1763,8 @@ export function ProgramaClient() {
         workOrderIdPorAvisoDocId,
         estadosServicioPorId,
         loadingEstadosServicio,
-        uidSoloProgramaAsignado,
+        filtroVistaTecnico,
+        busqueda,
       ),
     [
       programaParaGrilla,
@@ -1607,7 +1775,8 @@ export function ProgramaClient() {
       workOrderIdPorAvisoDocId,
       estadosServicioPorId,
       loadingEstadosServicio,
-      uidSoloProgramaAsignado,
+      filtroVistaTecnico,
+      busqueda,
     ],
   );
 
@@ -1620,6 +1789,8 @@ export function ProgramaClient() {
         workOrderIdPorAvisoDocId,
         estadosServicioPorId,
         loadingEstadosServicio,
+        filtroVistaTecnico,
+        busqueda,
       ),
     [
       slotsVisibles,
@@ -1628,6 +1799,8 @@ export function ProgramaClient() {
       workOrderIdPorAvisoDocId,
       estadosServicioPorId,
       loadingEstadosServicio,
+      filtroVistaTecnico,
+      busqueda,
     ],
   );
 
@@ -1804,7 +1977,9 @@ export function ProgramaClient() {
               ) : (
                 <p className="mt-1 text-xs text-muted-foreground">
                   Esta vista usa el centro de tu perfil.
-                  {esRolTecnico ? " Solo ves en el programa las tareas donde figurás como técnico sugerido." : null}
+                  {esRolTecnico
+                    ? " Ves el programa de tu especialidad: órdenes abiertas (asignadas a vos o sin asignar) en cualquier semana del selector."
+                    : null}
                 </p>
               )}
             </div>
@@ -1918,22 +2093,23 @@ export function ProgramaClient() {
                   {esRolTecnico ? (
                     <>
                       {" "}
-                      Solo ves tareas donde figurás como técnico sugerido.
+                      Ves órdenes abiertas de tu especialidad (asignadas a vos o sin asignar). Cambiá la semana arriba
+                      para organizarte en el tiempo.
                       <HelpIconTooltip
                         variant="info"
                         className="ml-0.5 align-text-bottom"
-                        ariaLabel="Por qué veo solo algunas tareas en el programa"
+                        ariaLabel="Qué tareas veo en el programa como técnico"
                         panelClassName="right-0 left-auto w-[min(24rem,calc(100vw-2.5rem))]"
                       >
                         <div className="block space-y-2 text-left">
                           <p>
-                            Con tu rol, la grilla puede mostrar solo las celdas donde el plan tiene{" "}
-                            <strong>tu usuario o nombre</strong> como técnico sugerido.
+                            La grilla muestra el <strong>programa publicado</strong> filtrado por la{" "}
+                            <strong>especialidad de tu perfil</strong> y solo chips con una{" "}
+                            <strong>orden de trabajo abierta</strong> que podés leer (la tuya o del pool sin asignar).
                           </p>
                           <p className="text-muted-foreground">
-                            Si no hay sugerido cargado, podés no ver una tarea aunque el aviso exista. Pedí a supervisión
-                            que actualice la asignación en el plan o revisá <strong>Tareas</strong> u otras pantallas
-                            según tu rol.
+                            Usá el selector de <strong>semana</strong> para ver otras semanas. Las cerradas o asignadas a
+                            otro operario no aparecen acá; el detalle completo está en <strong>Tareas</strong>.
                           </p>
                         </div>
                       </HelpIconTooltip>
@@ -2131,8 +2307,10 @@ export function ProgramaClient() {
             <div className="block space-y-2 text-left normal-case">
               <p>
                 <strong>Planta</strong> y <strong>Semana</strong> eligen qué programa cargar; el resto acota qué filas y
-                chips ves en la tabla. <strong>Especialidad</strong>, <strong>día</strong> y <strong>tipo</strong> filtran
-                la grilla; <strong>estado operativo</strong> incluye las etapas de la leyenda (colores del chip) y la
+                chips ves en la tabla. La <strong>búsqueda</strong> filtra por número de aviso o texto libre (descripción,
+                equipo, ubicación, fila de localidad). <strong>Especialidad</strong>, <strong>día</strong> y{" "}
+                <strong>tipo</strong> filtran la grilla; <strong>estado operativo</strong> incluye las etapas de la leyenda
+                (colores del chip) y la
                 opción <strong>orden previa (SAP)</strong>: solo avisos con el aro rojo (nuevo aviso mientras sigue{" "}
                 <strong>abierta</strong> una orden del mismo mantenimiento). Para{" "}
                 <strong>arrastrar una tarea a otro día</strong> (mantené apretada la tarjeta y soltala en la columna del
@@ -2150,6 +2328,22 @@ export function ProgramaClient() {
         {viewerEligeAlcanceMultiPlanta ? (
           <SelectorPlantaSuperadmin value={centroEfectivo} onChange={onCentroSuperadminChange} />
         ) : null}
+        <label className="flex min-w-[12rem] max-w-md flex-[1.5] flex-col gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Búsqueda
+          <span className="relative block">
+            <Search
+              className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              className="h-9 pl-7 text-sm font-normal normal-case"
+              placeholder="N.º de aviso o palabras (descripción, ubicación)…"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              aria-label="Buscar avisos en el programa por número o texto"
+            />
+          </span>
+        </label>
         <label className="flex min-w-[min(100%,14rem)] flex-1 flex-col gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             Semana
@@ -2188,14 +2382,16 @@ export function ProgramaClient() {
             onChange={onSemanaPublicaChange}
             disabled={semanasLoading}
           >
-            {!semanasParaSelector.length ? <option value="">— Sin semanas —</option> : null}
+            {!(vistaTodasPlantas ? semanasParaSelectorMerged : semanasParaSelectorSingle).length ? (
+              <option value="">— Sin semanas —</option>
+            ) : null}
             {vistaTodasPlantas
-              ? semanasParaSelector.map((s) => (
+              ? semanasParaSelectorMerged.map((s) => (
                   <option key={s.iso} value={s.iso}>
                     {s.label}
                   </option>
                 ))
-              : semanasParaSelector.map((s) => (
+              : semanasParaSelectorSingle.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.label}
                   </option>
@@ -2209,10 +2405,25 @@ export function ProgramaClient() {
             value={filtroEsp}
             onChange={(e) => setFiltroEsp(e.target.value as FiltroEspecialidad)}
           >
-            <option value="todos">Todos</option>
-            <option value="Aire">Aire</option>
-            <option value="Electrico">Eléctrico</option>
-            <option value="GG">GG</option>
+            {esRolTecnico ? (
+              <>
+                <option value="todos">Todas (mi perfil)</option>
+                {ESPECIALIDADES_PROGRAMA_FILTRO.filter((e) => especialidadesProgramaTecnico.includes(e)).map((e) => (
+                  <option key={e} value={e}>
+                    {etiquetaEspecialidadPrograma(e)}
+                  </option>
+                ))}
+              </>
+            ) : (
+              <>
+                <option value="todos">Todos</option>
+                {ESPECIALIDADES_PROGRAMA_FILTRO.map((e) => (
+                  <option key={e} value={e}>
+                    {etiquetaEspecialidadPrograma(e)}
+                  </option>
+                ))}
+              </>
+            )}
           </select>
         </label>
         <label className="flex min-w-[10rem] flex-1 flex-col gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -2614,8 +2825,12 @@ export function ProgramaClient() {
       ) : programaParaGrilla && !localidades.length ? (
         <p className="text-sm text-muted-foreground">
           {esRolTecnico
-            ? "No hay tareas del programa asignadas a tu usuario con los filtros seleccionados."
-            : "No hay avisos con los filtros seleccionados."}
+            ? busqueda.trim()
+              ? "No hay órdenes abiertas de tu especialidad que coincidan con la búsqueda o los filtros. Probá otro término o semana."
+              : "No hay órdenes abiertas de tu especialidad en esta semana con los filtros seleccionados. Probá otra semana en el selector."
+            : busqueda.trim()
+              ? "No hay avisos que coincidan con la búsqueda o los filtros seleccionados."
+              : "No hay avisos con los filtros seleccionados."}
         </p>
       ) : null}
 

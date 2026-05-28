@@ -11,7 +11,8 @@ import { COLLECTIONS } from "@/lib/firestore/collections";
 import { woConstraintExcluirArchivadas } from "@/lib/firestore/work-order-query";
 import { propuestaSemanaDocId, stablePropuestaItemId } from "@/lib/scheduling/propuesta-id";
 import type { PropuestaSemanaFirestore } from "@/lib/firestore/plan-mantenimiento-types";
-import type { Aviso } from "@/modules/notices/types";
+import type { Aviso, Especialidad } from "@/modules/notices/types";
+import type { WorkOrderEstado } from "@/modules/work-orders/types";
 import type {
   DiaSemanaPrograma,
   EspecialidadPrograma,
@@ -378,7 +379,20 @@ export type UseSemanasDisponiblesOptions = {
   incluirOtProgramadasSemana?: boolean;
   /** Semanas donde existe propuesta del motor (supervisor+, reglas Firestore). @default false */
   incluirPropuestasMotorSemana?: boolean;
+  /** Técnico: al sumar semanas desde OTs, solo abiertas en estas especialidades de dominio. */
+  otSemanasSoloEspecialidades?: Especialidad[];
 };
+
+function otCuentaSemanaDesdeProgramacion(
+  data: { especialidad?: Especialidad; estado?: WorkOrderEstado },
+  soloEspecialidades?: Especialidad[],
+): boolean {
+  if (!soloEspecialidades?.length) return true;
+  const esp = data.especialidad;
+  if (!esp || !soloEspecialidades.includes(esp)) return false;
+  const st = data.estado;
+  return st !== "CERRADA" && st !== "ANULADA";
+}
 
 export function useSemanasDisponibles(
   centro: string | undefined,
@@ -391,6 +405,7 @@ export function useSemanasDisponibles(
 } {
   const incluirOtProg = options?.incluirOtProgramadasSemana ?? true;
   const incluirPropuesta = Boolean(options?.incluirPropuestasMotorSemana);
+  const otSemanasSoloEspKey = (options?.otSemanasSoloEspecialidades ?? []).join("\0");
 
   const [listaPrograma, setListaPrograma] = useState<SemanaOpcion[]>([]);
   const [isosOt, setIsosOt] = useState<string[]>([]);
@@ -504,7 +519,12 @@ export function useSemanasDisponibles(
             if (cancelled) return;
             const isoWeeks = new Set<string>();
             for (const docSnap of snap.docs) {
-              const data = docSnap.data() as { fecha_inicio_programada?: Timestamp };
+              const data = docSnap.data() as {
+                fecha_inicio_programada?: Timestamp;
+                especialidad?: Especialidad;
+                estado?: WorkOrderEstado;
+              };
+              if (!otCuentaSemanaDesdeProgramacion(data, options?.otSemanasSoloEspecialidades)) continue;
               const fp = data.fecha_inicio_programada;
               if (!fp || typeof fp.toDate !== "function") continue;
               isoWeeks.add(getIsoWeekId(fp.toDate()));
@@ -552,7 +572,7 @@ export function useSemanasDisponibles(
       unsubOt?.();
       unsubProp?.();
     };
-  }, [centroKey, authUid, incluirOtProg, incluirPropuesta]);
+  }, [centroKey, authUid, incluirOtProg, incluirPropuesta, otSemanasSoloEspKey]);
 
   return { semanas: merged, loading, error };
 }
@@ -703,7 +723,10 @@ export type MergedSemanaOpcion = {
  */
 export function useSemanasDisponiblesTodas(
   authUid: string | undefined,
-  options?: Pick<UseSemanasDisponiblesOptions, "incluirOtProgramadasSemana" | "incluirPropuestasMotorSemana">,
+  options?: Pick<
+    UseSemanasDisponiblesOptions,
+    "incluirOtProgramadasSemana" | "incluirPropuestasMotorSemana" | "otSemanasSoloEspecialidades"
+  >,
 ): {
   semanas: MergedSemanaOpcion[];
   loading: boolean;
@@ -711,6 +734,7 @@ export function useSemanasDisponiblesTodas(
 } {
   const incluirOtProg = options?.incluirOtProgramadasSemana ?? true;
   const incluirPropuesta = Boolean(options?.incluirPropuestasMotorSemana);
+  const otSemanasSoloEspKey = (options?.otSemanasSoloEspecialidades ?? []).join("\0");
 
   const [programaPorCentro, setProgramaPorCentro] = useState<Record<string, SemanaOpcion[]>>({});
   const [otPorCentro, setOtPorCentro] = useState<Record<string, string[]>>({});
@@ -915,7 +939,13 @@ export function useSemanasDisponiblesTodas(
             if (cancelled) return;
             const isoByCentro = new Map<string, Set<string>>();
             for (const docSnap of snap.docs) {
-              const data = docSnap.data() as { fecha_inicio_programada?: Timestamp; centro?: string };
+              const data = docSnap.data() as {
+                fecha_inicio_programada?: Timestamp;
+                centro?: string;
+                especialidad?: Especialidad;
+                estado?: WorkOrderEstado;
+              };
+              if (!otCuentaSemanaDesdeProgramacion(data, options?.otSemanasSoloEspecialidades)) continue;
               const c = typeof data.centro === "string" ? data.centro.trim() : "";
               if (!centroSet.has(c)) continue;
               const fp = data.fecha_inicio_programada;
@@ -1017,7 +1047,7 @@ export function useSemanasDisponiblesTodas(
       cancelled = true;
       unsubs.forEach((u) => u());
     };
-  }, [authUid, incluirOtProg, incluirPropuesta]);
+  }, [authUid, incluirOtProg, incluirPropuesta, otSemanasSoloEspKey]);
 
   return { semanas: merged, loading, error };
 }

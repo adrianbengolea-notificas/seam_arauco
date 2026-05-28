@@ -18,6 +18,7 @@ import { DEFAULT_CENTRO, isCentroInKnownList, KNOWN_CENTROS, nombreCentro } from
 import { cn } from "@/lib/utils";
 import { toPermisoRol } from "@/lib/permisos/index";
 import type { Especialidad } from "@/modules/notices/types";
+import { ETIQUETA_ESPECIALIDAD_DOMINIO } from "@/modules/scheduling/especialidad-programa";
 import { getClientIdToken, useAuth } from "@/modules/users/hooks";
 import { isSuperAdminRole } from "@/modules/users/roles";
 import type { UserRole } from "@/modules/users/types";
@@ -26,12 +27,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 type RolAssignable = "tecnico" | "supervisor" | "admin" | "superadmin" | "cliente_arauco";
 
-const ESPECIALIDADES: { id: Especialidad; label: string }[] = [
-  { id: "AA", label: "Aire Acondicionado (AA)" },
-  { id: "ELECTRICO", label: "Eléctrico" },
-  { id: "GG", label: "Grupos Generadores (GG)" },
-  { id: "HG", label: "HG" },
-];
+const ESPECIALIDADES: { id: Especialidad; label: string }[] = (
+  ["AA", "ELECTRICO", "GG", "HG"] as const
+).map((id) => ({ id, label: ETIQUETA_ESPECIALIDAD_DOMINIO[id] }));
 
 const selectClass = cn(
   "flex h-10 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm shadow-sm",

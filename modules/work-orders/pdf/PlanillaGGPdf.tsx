@@ -4,6 +4,7 @@ import { formatFirestoreDate } from "@/lib/pdf/format-firestore-date";
 import type { ItemRespuesta, ItemTemplate, PlanillaRespuesta, PlanillaTemplate } from "@/lib/firestore/types";
 import { planillaFirmaResponsableSrc, planillaFirmaUsuarioSrc } from "@/lib/planillas/form-utils";
 import { planillaItemKey } from "@/lib/planillas/item-key";
+import { workOrderNumeroOperativo } from "@/modules/work-orders/n-ot-from-aviso";
 import type { WorkOrder } from "@/modules/work-orders/types";
 
 const s = StyleSheet.create({
@@ -262,7 +263,7 @@ export function PlanillaGGPdfDocument({
 }) {
   const { motor, generador } = resolveGgChecklists(template);
   const d = respuesta.datosEquipo;
-  const aviso = workOrder.aviso_numero?.trim() || workOrder.aviso_id?.trim() || workOrder.n_ot;
+  const numeroOrden = workOrderNumeroOperativo(workOrder);
   const motorMarcaModelo = [d?.gg_motor_marca, d?.gg_motor_modelo].filter(Boolean).join(" ").trim() || "—";
   const generadorMarcaModelo = [d?.gg_gen_marca, d?.gg_gen_modelo].filter(Boolean).join(" ").trim() || "—";
   const serieMotor = d?.gg_motor_serie?.trim() || "—";
@@ -298,7 +299,7 @@ export function PlanillaGGPdfDocument({
               </View>
               <View style={s.infoRow}>
                 <Text style={[s.infoLab, { width: "22%" }]}>Pedido de Compra :</Text>
-                <Text style={[s.infoVal, { width: "28%" }]}>{aviso}</Text>
+                <Text style={[s.infoVal, { width: "28%" }]}>{numeroOrden}</Text>
                 <Text style={[s.infoLab, { width: "22%" }]}>Tipo de chequeo :</Text>
                 <Text style={[s.infoVal, { borderRightWidth: 0, width: "28%" }]}>
                   ({frecuenciaChequeoLabel(workOrder)}; etc.)
@@ -378,7 +379,7 @@ export function PlanillaGGPdfDocument({
         </View>
 
         <Text style={s.footer} fixed>
-          Generado en Arauco-Seam · OT {workOrder.n_ot} · Planilla firmada
+          Generado en Arauco-Seam · Orden {numeroOrden} · Planilla firmada
         </Text>
       </Page>
     </Document>

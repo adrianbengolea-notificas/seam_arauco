@@ -12,6 +12,7 @@ import {
   requireVerifiedProfileFromToken,
 } from "@/lib/permisos/server";
 import { toPermisoRol } from "@/lib/permisos/index";
+import { ESPECIALIDADES_PROGRAMA } from "@/modules/scheduling/types";
 import { centrosEfectivosDelUsuario, usuarioTieneCentro } from "@/modules/users/centros-usuario";
 import type { UserProfileWithUid } from "@/modules/users/repository";
 import { stablePropuestaItemId } from "@/lib/scheduling/propuesta-id";
@@ -171,7 +172,7 @@ const moverAvisoProgramaPublicadoSchema = z.object({
   from: z.object({
     localidad: z.string(),
     dia: diaProgramaEnum,
-    especialidad: z.enum(["Aire", "Electrico", "GG"]),
+    especialidad: z.enum(ESPECIALIDADES_PROGRAMA),
   }),
 });
 
@@ -183,7 +184,7 @@ const quitarAvisoProgramaPublicadoSchema = z.object({
   from: z.object({
     localidad: z.string(),
     dia: diaProgramaEnum,
-    especialidad: z.enum(["Aire", "Electrico", "GG"]),
+    especialidad: z.enum(ESPECIALIDADES_PROGRAMA),
   }),
 });
 

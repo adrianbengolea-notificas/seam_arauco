@@ -11,6 +11,7 @@ import { mensajeErrorFirebaseParaUsuario } from "@/lib/firebase/mensaje-error-us
 import { cn } from "@/lib/utils";
 import { useAssetLive } from "@/modules/assets/hooks";
 import type { EspecialidadActivo } from "@/modules/assets/types";
+import { ETIQUETA_ESPECIALIDAD_DOMINIO } from "@/modules/scheduling/especialidad-programa";
 import { usePermisos } from "@/lib/permisos/usePermisos";
 import { getClientIdToken } from "@/modules/users/hooks";
 import { usuarioTieneCentro } from "@/modules/users/centros-usuario";
@@ -27,10 +28,10 @@ const selectClassName = cn(
 
 const ESPECIALIDAD_OPTIONS: Array<{ value: "" | EspecialidadActivo; label: string }> = [
   { value: "", label: "Sin asignar" },
-  { value: "AA", label: "AA" },
-  { value: "ELECTRICO", label: "Eléctrico" },
-  { value: "GG", label: "GG" },
-  { value: "HG", label: "HG" },
+  ...(["AA", "ELECTRICO", "GG", "HG"] as const).map((value) => ({
+    value,
+    label: ETIQUETA_ESPECIALIDAD_DOMINIO[value],
+  })),
 ];
 
 export default function ActivoDetallePage() {

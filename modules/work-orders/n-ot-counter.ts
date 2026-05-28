@@ -1,6 +1,12 @@
 import { getAdminDb } from "@/firebase/firebaseAdmin";
 import { FieldValue, type Transaction } from "firebase-admin/firestore";
 
+/** Correlativo interno solo para correctivos provisorios sin aviso SAP. */
+export async function allocateProvisorioNotInTransaction(txn: Transaction): Promise<string> {
+  const nNum = await allocateNextNotNumberInTransaction(txn);
+  return nNum.toString().padStart(8, "0");
+}
+
 /** Fragmentos del correlativo: menos contención que un único doc `counters/work_orders`. */
 const NUM_SHARDS = 32;
 /**
@@ -13,7 +19,8 @@ const shardsCol = () =>
   getAdminDb().collection("counters").doc("work_orders_shards").collection("shards");
 
 /**
- * Reserva el siguiente `n_ot` dentro de la misma transacción Firestore que crea la orden (y actualiza el aviso).
+ * Correlativo interno solo para OT provisoria sin aviso SAP.
+ * Las OT con aviso usan `n_ot` = número de aviso (`n-ot-from-aviso.ts`).
  */
 export async function allocateNextNotNumberInTransaction(txn: Transaction): Promise<number> {
   const shardId = Math.floor(Math.random() * NUM_SHARDS);

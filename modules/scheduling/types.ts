@@ -11,7 +11,9 @@ export type DiaSemanaPrograma =
   | "sabado"
   | "domingo";
 
-export type EspecialidadPrograma = "Aire" | "Electrico" | "GG";
+export const ESPECIALIDADES_PROGRAMA = ["Aire", "Electrico", "GG", "HG"] as const;
+
+export type EspecialidadPrograma = (typeof ESPECIALIDADES_PROGRAMA)[number];
 
 export type AvisoSlot = {
   numero: string;

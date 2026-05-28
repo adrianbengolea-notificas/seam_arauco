@@ -5,6 +5,7 @@ import { formatFirestoreDate } from "@/lib/pdf/format-firestore-date";
 import type { ItemRespuesta, PlanillaRespuesta, PlanillaTemplate } from "@/lib/firestore/types";
 import { planillaFirmaResponsableSrc, planillaFirmaUsuarioSrc } from "@/lib/planillas/form-utils";
 import { planillaItemKey } from "@/lib/planillas/item-key";
+import { workOrderNumeroOperativo } from "@/modules/work-orders/n-ot-from-aviso";
 import type { WorkOrder } from "@/modules/work-orders/types";
 
 const s = StyleSheet.create({
@@ -131,7 +132,7 @@ export function PlanillaAAPdfDocument({
   const items = actSec?.items ?? [];
   const d = respuesta.datosEquipo;
   const pairs = datosEquipoRows(d);
-  const aviso = workOrder.aviso_numero?.trim() || workOrder.aviso_id?.trim() || "—";
+  const numeroOrden = workOrderNumeroOperativo(workOrder);
   const freq = respuesta.frecuencia ? ` · Frec. ${respuesta.frecuencia}` : "";
 
   return (
@@ -149,12 +150,8 @@ export function PlanillaAAPdfDocument({
               <Text style={s.metaVal}>{nombreCentro(workOrder.centro)}</Text>
             </View>
             <View style={s.metaBox}>
-              <Text style={s.metaLab}>N.º orden Seam</Text>
-              <Text style={s.metaVal}>{workOrder.n_ot}</Text>
-            </View>
-            <View style={s.metaBox}>
-              <Text style={s.metaLab}>Aviso SAP</Text>
-              <Text style={s.metaVal}>{aviso}</Text>
+              <Text style={s.metaLab}>N.º orden / aviso</Text>
+              <Text style={s.metaVal}>{numeroOrden}</Text>
             </View>
             <View style={s.metaBox}>
               <Text style={s.metaLab}>Fecha</Text>
@@ -247,7 +244,7 @@ export function PlanillaAAPdfDocument({
           </View>
         </View>
         <Text style={s.footer} fixed>
-          Documento generado desde Arauco-Seam · OT {workOrder.n_ot} · Planilla firmada
+          Documento generado desde Arauco-Seam · Orden {numeroOrden} · Planilla firmada
         </Text>
       </Page>
     </Document>

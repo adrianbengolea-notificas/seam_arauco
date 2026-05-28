@@ -629,7 +629,7 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
             <option value="AA">AA</option>
             <option value="E">Eléctrico</option>
             <option value="GG">GG</option>
-            <option value="HG">HG</option>
+            <option value="HG">Hidrogrúa (HG)</option>
           </select>
         </label>
         {tab === "seguimiento" ? (

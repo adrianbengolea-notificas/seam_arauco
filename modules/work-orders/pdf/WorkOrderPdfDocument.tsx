@@ -52,7 +52,7 @@ export function WorkOrderPdfDocument({
       <Page size="A4" style={styles.page}>
         <PlanillaPDFSection workOrder={workOrder} template={planillaTemplate} respuesta={planillaRespuesta} />
         <Text style={styles.footer} fixed>
-          Planilla firmada · Arauco-Seam · OT {workOrder.n_ot}
+          Planilla firmada · Arauco-Seam · Orden {workOrder.aviso_numero?.trim() || workOrder.n_ot}
         </Text>
       </Page>
     </Document>

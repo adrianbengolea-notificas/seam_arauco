@@ -9,7 +9,9 @@ import { parseAvisosPorModo } from "@/lib/import/parse-avisos-excel";
 import type { ModoImportacionAvisos } from "@/lib/import/modo-importacion";
 import { normalizeHeader } from "@/lib/import/normalize-headers";
 
-const MODOS_PREVENTIVOS: ModoImportacionAvisos[] = [
+type ModoParseAvisosExcel = Exclude<ModoImportacionAvisos, "mensuales_parche">;
+
+const MODOS_PREVENTIVOS: ModoParseAvisosExcel[] = [
   "preventivos_todas",
   "preventivos_mensual",
   "preventivos_trimestral",

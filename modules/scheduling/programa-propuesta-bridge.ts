@@ -5,6 +5,7 @@ import { AppError } from "@/lib/errors/app-error";
 import type { OtPropuestaFirestore, PropuestaSemanaFirestore } from "@/lib/firestore/plan-mantenimiento-types";
 import { getAvisoById } from "@/modules/notices/repository";
 import type { Especialidad } from "@/modules/notices/types";
+import { especialidadDominioAPrograma } from "@/modules/scheduling/especialidad-programa";
 import { parseIsoWeekToBounds } from "@/modules/scheduling/iso-week";
 import { propuestaSemanaDocId } from "@/lib/scheduling/propuesta-id";
 import type {
@@ -38,9 +39,7 @@ function diaSemanaMotorAPrograma(d: string): DiaSemanaPrograma {
 }
 
 function espAPrograma(esp: Especialidad): EspecialidadPrograma {
-  if (esp === "AA") return "Aire";
-  if (esp === "ELECTRICO" || esp === "HG") return "Electrico";
-  return "GG";
+  return especialidadDominioAPrograma(esp);
 }
 
 function slotKey(loc: string, dia: DiaSemanaPrograma, e: EspecialidadPrograma): string {

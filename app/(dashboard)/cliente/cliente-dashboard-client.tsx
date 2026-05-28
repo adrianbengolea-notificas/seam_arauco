@@ -6,6 +6,7 @@ import { KNOWN_CENTROS } from "@/lib/config/app-config";
 import { useProgramaSemanaFusion, useSemanasDisponiblesTodas } from "@/modules/scheduling/hooks";
 import { getIsoWeekId } from "@/modules/scheduling/iso-week";
 import type { DiaSemanaPrograma, EspecialidadPrograma, ProgramaSemana } from "@/modules/scheduling/types";
+import { ESPECIALIDADES_PROGRAMA_ORDEN } from "@/modules/scheduling/especialidad-programa";
 import { useAuth } from "@/modules/users/hooks";
 import Link from "next/link";
 import { useMemo } from "react";
@@ -33,6 +34,7 @@ const ESPECIALIDAD_LABEL: Record<EspecialidadPrograma, string> = {
   Aire: "AA",
   Electrico: "E",
   GG: "GG",
+  HG: "HG",
 };
 
 function dotColorPrograma(
@@ -72,7 +74,7 @@ export function ClienteDashboardClient() {
 
   const { programa } = useProgramaSemanaFusion(docIdsFusion, semanaIsoKey || undefined, user?.uid);
 
-  const espRows: EspecialidadPrograma[] = ["Aire", "Electrico", "GG"];
+  const espRows: EspecialidadPrograma[] = [...ESPECIALIDADES_PROGRAMA_ORDEN];
 
   const nombre = profile?.display_name?.trim() || profile?.email || "Cliente";
 

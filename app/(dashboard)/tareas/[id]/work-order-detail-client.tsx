@@ -47,6 +47,10 @@ import {
   useWorkOrderMaterials,
 } from "@/modules/work-orders/hooks";
 import {
+  workOrderNumeroOperativo,
+  workOrderReferenciasDistintas,
+} from "@/modules/work-orders/n-ot-from-aviso";
+import {
   workOrderSubtipo,
   workOrderVistaStatus,
   type WorkOrderSubTipo,
@@ -550,10 +554,10 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
       workOrder.estado === "EN_EJECUCION");
   const subtipoWo = workOrderSubtipo(workOrder);
   const tituloOt = workOrder.texto_trabajo?.trim() || "Sin descripción";
-  const avisoRef = workOrder.aviso_numero?.trim() || workOrder.aviso_id?.trim();
-  const refOrdenServicio = avisoRef
-    ? `${nombreCentro(workOrder.centro)} · Aviso ${avisoRef}`
-    : `${nombreCentro(workOrder.centro)} · Ref. interna ${workOrder.n_ot}`;
+  const numeroOrden = workOrderNumeroOperativo(workOrder);
+  const refOrdenServicio = workOrder.provisorio_sin_aviso_sap
+    ? `${nombreCentro(workOrder.centro)} · Orden provisoria ${numeroOrden}`
+    : `${nombreCentro(workOrder.centro)} · Orden ${numeroOrden}`;
   const equipoDescripcion =
     assetLive?.denominacion?.trim() || equipoCatalogo?.descripcion?.trim() || null;
   const equipoCodigo =
@@ -772,14 +776,16 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
         >
           <p>
             <span className="font-semibold">Cerrá primero la orden anterior del mismo mantenimiento</span> (n.º{" "}
-            <span className="font-mono">{avisoLive.antecesor_orden_abierta.n_ot}</span>, aviso SAP{" "}
-            <span className="font-mono">{avisoLive.antecesor_orden_abierta.n_aviso}</span>). Este aviso es nuevo, pero
-            el trabajo pendiente sigue en la otra orden:{" "}
+            <span className="font-mono">
+              {avisoLive.antecesor_orden_abierta.n_aviso || avisoLive.antecesor_orden_abierta.n_ot}
+            </span>
+            ). Este aviso es nuevo, pero el trabajo pendiente sigue en la otra orden:{" "}
             <Link
               href={`/tareas/${avisoLive.antecesor_orden_abierta.work_order_id}`}
               className="font-semibold underline underline-offset-2"
             >
-              Abrir orden n.º {avisoLive.antecesor_orden_abierta.n_ot}
+              Abrir orden n.º{" "}
+              {avisoLive.antecesor_orden_abierta.n_aviso || avisoLive.antecesor_orden_abierta.n_ot}
             </Link>
           </p>
         </div>
@@ -793,10 +799,11 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
         <CardContent className="space-y-3 text-sm">
           <div className="grid gap-2 sm:grid-cols-2">
             <div>
-              <p className="text-xs font-medium text-zinc-500">Aviso</p>
-              <p className="font-mono font-semibold">
-                {workOrder.aviso_numero || workOrder.aviso_id || "—"}
-              </p>
+              <p className="text-xs font-medium text-zinc-500">N.º orden / aviso</p>
+              <p className="font-mono font-semibold">{numeroOrden}</p>
+              {workOrderReferenciasDistintas(workOrder) ? (
+                <p className="mt-0.5 font-mono text-xs text-zinc-500">Ref. histórica {workOrder.n_ot}</p>
+              ) : null}
             </div>
             <div>
               <p className="text-xs font-medium text-zinc-500">Centro</p>

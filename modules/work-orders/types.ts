@@ -57,6 +57,7 @@ export function firmaPadUsuarioDisplaySrc(wo: WorkOrder): string | null {
 /** OT principal — colección `work_orders` */
 export type WorkOrder = {
   id: string;
+  /** Número operativo de la orden: coincide con el aviso SAP salvo OT provisoria sin aviso. */
   n_ot: string;
   /** Opcional: misma clave que `avisos`/`plan_mantenimiento` si la orden sale del plan maestro. */
   plan_id?: string;
@@ -214,7 +215,7 @@ export function materialOtDenormFromWorkOrder(wo: WorkOrder, workOrderId: string
     ot_id: workOrderId,
     ot_tipo: materialOtTipoReporte(wo),
     ot_especialidad: wo.especialidad,
-    ot_numero_aviso: wo.aviso_numero?.trim() || wo.n_ot || "",
+    ot_numero_aviso: wo.aviso_numero?.trim() || wo.n_ot?.trim() || "",
     ot_descripcion: wo.texto_trabajo || "",
     ot_fecha_completada: wo.fecha_fin_ejecucion ?? null,
     ot_centro: wo.centro || "",

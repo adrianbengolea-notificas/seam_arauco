@@ -96,7 +96,7 @@ export function historialEventoResumen(ev: WorkOrderHistorialEvent): string {
   const p = ev.payload ?? {};
   switch (ev.tipo) {
     case "CREADA":
-      return `n_ot ${String(p.n_ot ?? "")} · aviso ${String(p.aviso_id ?? "—")}`;
+      return `orden ${String(p.n_ot ?? "—")}`;
     case "ESTADO_CAMBIO":
       return [p.desde ? `desde ${String(p.desde)}` : null, p.hacia ? `→ ${String(p.hacia)}` : null]
         .filter(Boolean)

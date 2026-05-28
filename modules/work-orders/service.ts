@@ -32,12 +32,24 @@ import {
   inferMtsaDesdeAviso,
   proximoVencimientoDesdeFecha,
 } from "@/lib/vencimientos";
-import { getIsoWeekId, isoDiaSemanaDesdeDateLocal } from "@/modules/scheduling/iso-week";
-import { scheduleWorkOrderInWeek } from "@/modules/scheduling/service";
+import {
+  diaProgramaADiaIsoSemana,
+  getIsoWeekId,
+  isoDiaSemanaDesdeDateLocal,
+} from "@/modules/scheduling/iso-week";
+import {
+  resolverUbicacionAvisoEnProgramaPublicado,
+  scheduleWorkOrderInWeek,
+  vincularWorkOrderEnProgramaPublicadoDesdeAviso,
+} from "@/modules/scheduling/service";
 import type { EspecialidadPrograma, DiaSemanaPrograma } from "@/modules/scheduling/types";
 import { clearWorkOrderIdEnProgramaSemanaAdmin } from "@/modules/scheduling/repository";
 import { uploadFirmaDigitalFromDataUrl } from "@/modules/work-orders/firma-storage-admin";
-import { allocateNextNotNumberInTransaction } from "@/modules/work-orders/n-ot-counter";
+import { allocateProvisorioNotInTransaction } from "@/modules/work-orders/n-ot-counter";
+import {
+  mensajeAntecesorOrdenPendiente,
+  nOtDesdeNumeroAviso,
+} from "@/modules/work-orders/n-ot-from-aviso";
 import {
   addChecklistItemsBatch,
   addEvidenciaDoc,
@@ -111,6 +123,21 @@ export async function createWorkOrderFromAviso(input: {
   sincronizarPlanPendiente?: boolean;
 }): Promise<string> {
   const aviso = await requireAviso(input.avisoId);
+
+  let fechaInicioEfectiva = input.fecha_inicio_programada;
+  if (fechaInicioEfectiva === undefined) {
+    const ubicPrograma = await resolverUbicacionAvisoEnProgramaPublicado({
+      centro: aviso.centro,
+      n_aviso: aviso.n_aviso,
+      avisoFirestoreId: aviso.id,
+      incluido_en_semana: aviso.incluido_en_semana,
+      fechaReferencia: aviso.fecha_programada ?? null,
+    });
+    if (ubicPrograma?.slotFecha != null) {
+      fechaInicioEfectiva = ubicPrograma.slotFecha as AdminTimestamp;
+    }
+  }
+
   if (aviso.work_order_id) {
     throw new AppError("CONFLICT", "El aviso ya tiene OT generada", {
       details: { work_order_id: aviso.work_order_id },
@@ -119,11 +146,7 @@ export async function createWorkOrderFromAviso(input: {
 
   const ant = aviso.antecesor_orden_abierta;
   if (ant?.work_order_id?.trim()) {
-    throw new AppError(
-      "CONFLICT",
-      `Cerrá primero la OT n.º ${ant.n_ot} (aviso SAP ${ant.n_aviso}) del mismo mantenimiento antes de generar una nueva.`,
-      { details: ant },
-    );
+    throw new AppError("CONFLICT", mensajeAntecesorOrdenPendiente(ant), { details: ant });
   }
 
   const woId = newWorkOrderDocId();
@@ -143,14 +166,10 @@ export async function createWorkOrderFromAviso(input: {
     }
     const antF = avisoFresh.antecesor_orden_abierta;
     if (antF?.work_order_id?.trim()) {
-      throw new AppError(
-        "CONFLICT",
-        `Cerrá primero la OT n.º ${antF.n_ot} (aviso SAP ${antF.n_aviso}) del mismo mantenimiento antes de generar una nueva.`,
-        { details: antF },
-      );
+      throw new AppError("CONFLICT", mensajeAntecesorOrdenPendiente(antF), { details: antF });
     }
 
-    /** Lecturas de activo antes del contador `n_ot`: ese paso ya escribe en Firestore. */
+    /** Lecturas de activo antes de escribir la OT en Firestore. */
     const asset = await resolveAssetForAvisoInTransaction(txn, avisoFresh);
 
     const claveMantenimiento =
@@ -162,18 +181,19 @@ export async function createWorkOrderFromAviso(input: {
         tipo: avisoFresh.tipo,
       });
 
-    const nNum = await allocateNextNotNumberInTransaction(txn);
-    n_ot = nNum.toString().padStart(8, "0");
+    const avisoNumero = nOtDesdeNumeroAviso(avisoFresh.n_aviso);
+    n_ot = avisoNumero;
     const especialidadOt: Especialidad = asset?.especialidad_predeterminada ?? avisoFresh.especialidad;
 
     const fechaProg = (
-      input.fecha_inicio_programada !== undefined
-        ? input.fecha_inicio_programada
+      fechaInicioEfectiva !== undefined
+        ? fechaInicioEfectiva
         : (avisoFresh.fecha_programada ?? null)
     ) as WorkOrder["fecha_inicio_programada"];
 
     const base: Omit<WorkOrder, "id" | "created_at" | "updated_at"> = {
       n_ot,
+      aviso_numero: avisoNumero,
       aviso_id: avisoFresh.id,
       archivada: false,
       asset_id: asset?.id ?? "",
@@ -540,28 +560,82 @@ async function autoProgramarOtManualEnSemanaIso(workOrderId: string): Promise<vo
   const wo = await getWorkOrderById(workOrderId);
   if (!wo) return;
 
-  const fp = wo.fecha_inicio_programada;
-  let fechaAgenda: Date;
-  if (fp != null && typeof (fp as AdminTimestamp).toDate === "function") {
-    const d = (fp as AdminTimestamp).toDate();
-    fechaAgenda = Number.isNaN(d.getTime()) ? new Date() : d;
-  } else {
-    fechaAgenda = new Date();
+  const avisoId = wo.aviso_id?.trim();
+  let ubicPrograma: Awaited<ReturnType<typeof resolverUbicacionAvisoEnProgramaPublicado>> = null;
+  let vinculadoEnGrillaPublicada = false;
+
+  if (avisoId) {
+    const aviso = await getAvisoById(avisoId);
+    if (aviso) {
+      ubicPrograma = await resolverUbicacionAvisoEnProgramaPublicado({
+        centro: aviso.centro,
+        n_aviso: aviso.n_aviso,
+        avisoFirestoreId: aviso.id,
+        incluido_en_semana: aviso.incluido_en_semana,
+        fechaReferencia: wo.fecha_inicio_programada ?? aviso.fecha_programada ?? null,
+      });
+      if (ubicPrograma) {
+        vinculadoEnGrillaPublicada = await vincularWorkOrderEnProgramaPublicadoDesdeAviso({
+          workOrderId,
+          avisoId,
+        });
+      }
+    }
   }
 
-  const sinFechaPersistida = fp == null;
+  let weekId: string;
+  let diaSemana: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  let fechaAgenda: Date;
 
-  if (sinFechaPersistida) {
-    await updateWorkOrderDoc(workOrderId, {
-      fecha_inicio_programada: AdminTimestamp.fromDate(startOfDay(fechaAgenda)),
-    });
+  if (ubicPrograma) {
+    weekId = ubicPrograma.weekId;
+    diaSemana = diaProgramaADiaIsoSemana(ubicPrograma.dia);
+    const slotTs = ubicPrograma.slotFecha;
+    if (slotTs != null && typeof slotTs.toDate === "function") {
+      const d = slotTs.toDate();
+      fechaAgenda = Number.isNaN(d.getTime()) ? new Date() : d;
+      const fp = wo.fecha_inicio_programada;
+      const fpMs =
+        fp != null && typeof (fp as AdminTimestamp).toDate === "function"
+          ? (fp as AdminTimestamp).toDate().getTime()
+          : NaN;
+      if (Number.isNaN(fpMs) || fpMs !== fechaAgenda.getTime()) {
+        await updateWorkOrderDoc(workOrderId, {
+          fecha_inicio_programada: slotTs as AdminTimestamp,
+        });
+      }
+    } else {
+      const fp = wo.fecha_inicio_programada;
+      if (fp != null && typeof (fp as AdminTimestamp).toDate === "function") {
+        const d = (fp as AdminTimestamp).toDate();
+        fechaAgenda = Number.isNaN(d.getTime()) ? new Date() : d;
+      } else {
+        fechaAgenda = new Date();
+      }
+    }
+  } else {
+    const fp = wo.fecha_inicio_programada;
+    if (fp != null && typeof (fp as AdminTimestamp).toDate === "function") {
+      const d = (fp as AdminTimestamp).toDate();
+      fechaAgenda = Number.isNaN(d.getTime()) ? new Date() : d;
+    } else {
+      fechaAgenda = new Date();
+    }
+    weekId = getIsoWeekId(fechaAgenda);
+    diaSemana = isoDiaSemanaDesdeDateLocal(fechaAgenda);
+    if (fp == null) {
+      await updateWorkOrderDoc(workOrderId, {
+        fecha_inicio_programada: AdminTimestamp.fromDate(startOfDay(fechaAgenda)),
+      });
+    }
   }
 
   try {
     await scheduleWorkOrderInWeek({
-      weekId: getIsoWeekId(fechaAgenda),
+      weekId,
       workOrderId,
-      dia_semana: isoDiaSemanaDesdeDateLocal(fechaAgenda),
+      dia_semana: diaSemana,
+      skipProgramaPublicadoSync: vinculadoEnGrillaPublicada,
     });
   } catch (e) {
     console.error("[OT manual] No se pudo agendar en programa semanal:", e);
@@ -630,6 +704,20 @@ export async function createWorkOrderFromForm(input: {
     }
   }
 
+  let fechaInicioEfectivaForm = input.fecha_inicio_programada;
+  if (fechaInicioEfectivaForm === undefined && aviso) {
+    const ubicPrograma = await resolverUbicacionAvisoEnProgramaPublicado({
+      centro: aviso.centro,
+      n_aviso: aviso.n_aviso,
+      avisoFirestoreId: aviso.id,
+      incluido_en_semana: aviso.incluido_en_semana,
+      fechaReferencia: aviso.fecha_programada ?? null,
+    });
+    if (ubicPrograma?.slotFecha != null) {
+      fechaInicioEfectivaForm = ubicPrograma.slotFecha as AdminTimestamp;
+    }
+  }
+
   if (input.sub_tipo === "preventivo") {
     const idTrim = input.aviso_id?.trim() ?? "";
     const numTrim = input.aviso_numero?.trim() ?? "";
@@ -664,8 +752,15 @@ export async function createWorkOrderFromForm(input: {
       }
     }
 
-    const nNum = await allocateNextNotNumberInTransaction(txn);
-    n_ot = nNum.toString().padStart(8, "0");
+    const aviso_numero_raw = avisoFresh?.n_aviso ?? input.aviso_numero;
+    const provisorioFlag =
+      input.sub_tipo === "correctivo" && !avisoFresh && !avisoManualTrim;
+
+    if (provisorioFlag) {
+      n_ot = await allocateProvisorioNotInTransaction(txn);
+    } else {
+      n_ot = nOtDesdeNumeroAviso(aviso_numero_raw);
+    }
 
     if (aviso && avisoFresh) {
       txn.update(avisoRef(aviso.id), {
@@ -679,9 +774,9 @@ export async function createWorkOrderFromForm(input: {
     const ubicacion =
       input.ubicacion_tecnica?.trim() || avisoFresh?.ubicacion_tecnica || "—";
     const frecuencia = avisoFresh?.frecuencia ?? "UNICA";
-    const aviso_numero = avisoFresh?.n_aviso ?? input.aviso_numero;
-    const provisorioFlag =
-      input.sub_tipo === "correctivo" && !avisoFresh && !avisoManualTrim;
+    const aviso_numero = provisorioFlag
+      ? undefined
+      : nOtDesdeNumeroAviso(aviso_numero_raw);
 
     const base: Omit<WorkOrder, "id" | "created_at" | "updated_at"> = {
       n_ot,
@@ -702,11 +797,11 @@ export async function createWorkOrderFromForm(input: {
       ...(fueraCatalogoCorrectivo ? { activo_fuera_catalogo: true } : {}),
       ...(asset ? { equipo_codigo: asset.codigo_nuevo } : {}),
       fecha_inicio_programada: (
-        input.fecha_inicio_programada !== undefined
-          ? input.fecha_inicio_programada
+        fechaInicioEfectivaForm !== undefined
+          ? fechaInicioEfectivaForm
           : (avisoFresh?.fecha_programada ?? null)
       ) as WorkOrder["fecha_inicio_programada"],
-      ...(aviso_numero !== undefined && aviso_numero !== null ? { aviso_numero } : {}),
+      ...(aviso_numero ? { aviso_numero } : {}),
       ...(input.frecuencia_plan_mtsa ? { frecuencia_plan_mtsa: input.frecuencia_plan_mtsa } : {}),
       ...(denomUbicTrim ? { denom_ubic_tecnica: denomUbicTrim } : {}),
       ...(input.tecnico_asignado_uid

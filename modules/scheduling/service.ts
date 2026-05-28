@@ -16,6 +16,7 @@ import {
   getWeeklySlotAdmin,
   moveAvisoEnProgramaPublicadoTxn,
   removeAvisoFromProgramaSemanaAdmin,
+  setWorkOrderIdEnProgramaSemanaAdmin,
   updateWeeklySlotAdmin,
   replaceWeeklyPlanRowsAdmin,
   updateWeeklyPlanRowAdmin,
@@ -29,10 +30,16 @@ import type {
 } from "@/modules/scheduling/types";
 import { toPermisoRol } from "@/lib/permisos/index";
 import { usuarioTieneCentro } from "@/modules/users/centros-usuario";
-import { diaIsoSemanaADiaPrograma, parseIsoWeekIdFromSemanaParam } from "@/modules/scheduling/iso-week";
+import {
+  diaIsoSemanaADiaPrograma,
+  diaProgramaADiaIsoSemana,
+  getIsoWeekId,
+  parseIsoWeekIdFromSemanaParam,
+} from "@/modules/scheduling/iso-week";
 import type { UserProfileWithUid } from "@/modules/users/repository";
 import { getAvisoById, updateAviso } from "@/modules/notices/repository";
 import type { Especialidad, TipoAviso } from "@/modules/notices/types";
+import { especialidadDominioAPrograma } from "@/modules/scheduling/especialidad-programa";
 import type { WorkOrder } from "@/modules/work-orders/types";
 import { getWorkOrderById } from "@/modules/work-orders/repository";
 
@@ -57,6 +64,8 @@ export async function scheduleWorkOrderInWeek(input: {
   workOrderId: string;
   dia_semana: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   turno?: "A" | "B" | "C";
+  /** Si el aviso ya está en `programa_semanal`, no agregar chip duplicado `OT-…`. */
+  skipProgramaPublicadoSync?: boolean;
 }): Promise<string> {
   const wo = await getWorkOrderById(input.workOrderId);
   if (!wo) {
@@ -92,17 +101,19 @@ export async function scheduleWorkOrderInWeek(input: {
     orden_en_dia: orden,
   });
 
-  try {
-    await syncOtManualAlProgramaPublicado({
-      weekId: input.weekId,
-      centro: centroOt,
-      wo,
-      diaPrograma: diaIsoSemanaADiaPrograma(input.dia_semana),
-      turno: input.turno,
-    });
-  } catch (e) {
-    await deleteWeeklySlotAdmin(input.weekId, slotId);
-    throw e;
+  if (!input.skipProgramaPublicadoSync) {
+    try {
+      await syncOtManualAlProgramaPublicado({
+        weekId: input.weekId,
+        centro: centroOt,
+        wo,
+        diaPrograma: diaIsoSemanaADiaPrograma(input.dia_semana),
+        turno: input.turno,
+      });
+    } catch (e) {
+      await deleteWeeklySlotAdmin(input.weekId, slotId);
+      throw e;
+    }
   }
 
   return slotId;
@@ -301,20 +312,27 @@ export async function removeWeeklyPlanRow(input: {
 }
 
 function especialidadAAvisoToPrograma(esp: Especialidad): EspecialidadPrograma {
-  if (esp === "ELECTRICO" || esp === "HG") return "Electrico";
-  if (esp === "AA") return "Aire";
-  return "GG";
+  return especialidadDominioAPrograma(esp);
 }
 
 function localidadProgramaDesdeInput(localidad: string | undefined, aviso: { ubicacion_tecnica: string; centro: string }): string {
   return (localidad?.trim() || aviso.ubicacion_tecnica || aviso.centro || "").trim() || "—";
 }
 
+export type UbicacionAvisoEnProgramaPublicado = {
+  programaDocId: string;
+  weekId: string;
+  localidad: string;
+  dia: DiaSemanaPrograma;
+  especialidad: EspecialidadPrograma;
+  slotFecha: SlotSemanal["fecha"] | null;
+};
+
 function findAvisoUbicacionEnSlots(
   slots: SlotSemanal[] | undefined,
   avisoNumero: string,
   avisoFirestoreId: string,
-): { localidad: string; dia: DiaSemanaPrograma; especialidad: EspecialidadPrograma } | null {
+): Omit<UbicacionAvisoEnProgramaPublicado, "programaDocId" | "weekId"> | null {
   for (const slot of slots ?? []) {
     for (const a of slot.avisos ?? []) {
       const match =
@@ -325,11 +343,80 @@ function findAvisoUbicacionEnSlots(
           localidad: slot.localidad,
           dia: slot.dia,
           especialidad: slot.especialidad,
+          slotFecha: slot.fecha ?? null,
         };
       }
     }
   }
   return null;
+}
+
+/** Busca el aviso en la grilla publicada (prioriza `incluido_en_semana`, luego semana de la fecha de la OT). */
+export async function resolverUbicacionAvisoEnProgramaPublicado(input: {
+  centro: string;
+  n_aviso: string;
+  avisoFirestoreId: string;
+  incluido_en_semana?: string | null;
+  fechaReferencia?: { toDate?: () => Date } | null;
+}): Promise<UbicacionAvisoEnProgramaPublicado | null> {
+  const centro = input.centro.trim();
+  if (!centro) return null;
+  const candidatos: string[] = [];
+  const inc = String(input.incluido_en_semana ?? "").trim();
+  if (/^\d{4}-W\d{2}$/.test(inc)) candidatos.push(inc);
+  const fr = input.fechaReferencia;
+  if (fr != null && typeof fr.toDate === "function") {
+    const d = fr.toDate();
+    if (!Number.isNaN(d.getTime())) {
+      const w = getIsoWeekId(d);
+      if (!candidatos.includes(w)) candidatos.push(w);
+    }
+  }
+  const hoy = getIsoWeekId(new Date());
+  if (!candidatos.includes(hoy)) candidatos.push(hoy);
+
+  for (const weekId of candidatos) {
+    const programaDocId = propuestaSemanaDocId(centro, weekId);
+    const programa = await getProgramaSemana(programaDocId);
+    const ubic = findAvisoUbicacionEnSlots(programa?.slots, input.n_aviso, input.avisoFirestoreId);
+    if (ubic) {
+      return { programaDocId, weekId, ...ubic };
+    }
+  }
+  return null;
+}
+
+/**
+ * Si el aviso ya figura en `programa_semanal`, solo vincula la OT al chip existente (sin duplicar `OT-…`).
+ * @returns `true` si se actualizó la grilla publicada.
+ */
+export async function vincularWorkOrderEnProgramaPublicadoDesdeAviso(input: {
+  workOrderId: string;
+  avisoId: string;
+}): Promise<boolean> {
+  const aviso = await getAvisoById(input.avisoId.trim());
+  if (!aviso) return false;
+  const wo = await getWorkOrderById(input.workOrderId.trim());
+  if (!wo) return false;
+
+  const ubic = await resolverUbicacionAvisoEnProgramaPublicado({
+    centro: aviso.centro,
+    n_aviso: aviso.n_aviso,
+    avisoFirestoreId: aviso.id,
+    incluido_en_semana: aviso.incluido_en_semana,
+    fechaReferencia: wo.fecha_inicio_programada ?? aviso.fecha_programada ?? null,
+  });
+  if (!ubic) return false;
+
+  return setWorkOrderIdEnProgramaSemanaAdmin({
+    programaDocId: ubic.programaDocId,
+    localidad: ubic.localidad,
+    dia: ubic.dia,
+    especialidad: ubic.especialidad,
+    avisoNumero: aviso.n_aviso,
+    avisoFirestoreId: aviso.id,
+    workOrderId: wo.id,
+  });
 }
 
 function buildAvisoSlotDesdeAviso(aviso: {

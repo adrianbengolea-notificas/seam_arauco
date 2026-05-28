@@ -8,8 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { getFirebaseDb } from "@/firebase/firebaseClient";
 import { DEFAULT_CENTRO, KNOWN_CENTROS, nombreCentro } from "@/lib/config/app-config";
 import { useCentroConfigLive } from "@/modules/centros/hooks";
-import type { Aviso, FrecuenciaMantenimiento } from "@/modules/notices/types";
-import type { Especialidad } from "@/modules/notices/types";
+import type { Aviso, Especialidad, FrecuenciaMantenimiento } from "@/modules/notices/types";
+import { ETIQUETA_ESPECIALIDAD_DOMINIO } from "@/modules/scheduling/especialidad-programa";
 import { useAssetLive, useAssetsLive } from "@/modules/assets/hooks";
 import { getClientIdToken, useAuth } from "@/modules/users/hooks";
 import { toPermisoRol } from "@/lib/permisos/index";
@@ -110,12 +110,9 @@ async function searchAvisosParaOt(
     .slice(0, 12);
 }
 
-const ESP_OPTS: { value: Especialidad; label: string }[] = [
-  { value: "AA", label: "Aire (AA)" },
-  { value: "ELECTRICO", label: "Eléctrico" },
-  { value: "GG", label: "GG" },
-  { value: "HG", label: "HG" },
-];
+const ESP_OPTS: { value: Especialidad; label: string }[] = (
+  ["AA", "ELECTRICO", "GG", "HG"] as const
+).map((value) => ({ value, label: ETIQUETA_ESPECIALIDAD_DOMINIO[value] }));
 
 const SUB_OPTS: { value: WorkOrderSubTipo; label: string }[] = [
   { value: "preventivo", label: "Preventivo" },

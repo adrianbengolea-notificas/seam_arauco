@@ -33,7 +33,7 @@ function especialidadLabel(code: MaterialOTConsumoRow["otEspecialidad"]): string
     case "GG":
       return "GG";
     case "HG":
-      return "HG";
+      return "Hidrogrúa";
     default:
       return "—";
   }
@@ -353,7 +353,7 @@ export function MaterialesReportingClient() {
               <option value="A">AA</option>
               <option value="E">Eléctrico</option>
               <option value="GG">GG</option>
-              <option value="HG">HG</option>
+              <option value="HG">Hidrogrúa (HG)</option>
             </select>
           </label>
           <label className="flex flex-col gap-0.5 text-[11px] font-medium uppercase tracking-wide text-zinc-500">

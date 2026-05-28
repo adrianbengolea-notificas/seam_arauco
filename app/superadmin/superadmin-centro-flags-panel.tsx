@@ -28,7 +28,7 @@ const ESP_LABEL: Partial<Record<Especialidad, string>> = {
   AA: "Aire acondicionado",
   ELECTRICO: "Eléctrico",
   GG: "Disciplina GG",
-  HG: "Disciplina HG",
+  HG: "Hidrogrúa (HG)",
 };
 
 const MODULO_DEFS: {

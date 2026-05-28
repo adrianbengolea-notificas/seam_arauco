@@ -18,6 +18,7 @@ import { propuestaSemanaDocId } from "@/lib/scheduling/propuesta-id";
 import { usePropuestaMotorSemana } from "@/modules/scheduling/hooks";
 import { getIsoWeekId, parseIsoWeekIdFromSemanaParam } from "@/modules/scheduling/iso-week";
 import type { Especialidad } from "@/modules/notices/types";
+import { ETIQUETA_ESPECIALIDAD_DOMINIO } from "@/modules/scheduling/especialidad-programa";
 import { getClientIdToken, useAuthUser, useUserProfile } from "@/modules/users/hooks";
 import { isSuperAdminRole } from "@/modules/users/roles";
 import { cn } from "@/lib/utils";
@@ -38,12 +39,7 @@ const DIA_LABEL: Record<(typeof DIAS_ORDEN)[number], string> = {
   domingo: "Domingo",
 };
 
-const ESP_LABEL: Partial<Record<Especialidad, string>> = {
-  AA: "AA",
-  ELECTRICO: "Eléctrico",
-  GG: "GG",
-  HG: "HG",
-};
+const ESP_LABEL: Partial<Record<Especialidad, string>> = ETIQUETA_ESPECIALIDAD_DOMINIO;
 
 /** Ítems de calendario (planificado) primero; el resto (urgencias, legacy sin origen, correctivos) después. */
 function partitionPorOrigenPropuesta(items: OtPropuestaFirestore[]): {

@@ -7,11 +7,16 @@ import { mensajeErrorFirebaseParaUsuario } from "@/lib/firebase/mensaje-error-us
 import { cn } from "@/lib/utils";
 import { useCentroConfigLive } from "@/modules/centros/hooks";
 import type { Especialidad } from "@/modules/notices/types";
+import { ETIQUETA_ESPECIALIDAD_DOMINIO } from "@/modules/scheduling/especialidad-programa";
 import {
   useWorkOrdersByEspecialidad,
   type WorkOrderEspecialidadTab,
 } from "@/modules/work-orders/hooks";
 import { historialEstadoEtiqueta } from "@/modules/work-orders/historial-labels";
+import {
+  workOrderNumeroOperativo,
+  workOrderReferenciasDistintas,
+} from "@/modules/work-orders/n-ot-from-aviso";
 import {
   workOrderFrecuenciaBadge,
   workOrderSubtipo,
@@ -81,13 +86,14 @@ function OtCard({ wo, showCentro }: { wo: WorkOrder; showCentro?: boolean }) {
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0 flex-1 space-y-1">
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              {(wo.aviso_numero ?? wo.aviso_id) ? (
-                <span className="font-mono font-semibold text-foreground">
-                  Aviso {wo.aviso_numero ?? wo.aviso_id}
-                </span>
-              ) : null}
-              {wo.n_ot ? (
-                <span className="font-mono text-muted-foreground" title="Referencia interna (correlativo)">
+              <span className="font-mono font-semibold text-foreground">
+                Orden {workOrderNumeroOperativo(wo)}
+              </span>
+              {workOrderReferenciasDistintas(wo) ? (
+                <span
+                  className="font-mono text-muted-foreground"
+                  title="Referencia histórica distinta del aviso SAP"
+                >
                   Ref. {wo.n_ot}
                 </span>
               ) : null}
@@ -200,12 +206,7 @@ function CollapseSection({
   );
 }
 
-const ESP_TAB_LABEL: Record<Especialidad, string> = {
-  AA: "Aire (AA)",
-  ELECTRICO: "Eléctrico",
-  GG: "GG",
-  HG: "HG",
-};
+const ESP_TAB_LABEL: Record<Especialidad, string> = ETIQUETA_ESPECIALIDAD_DOMINIO;
 
 const STATUS_FILTERS: { id: WorkOrderVistaStatus | "ALL"; label: string }[] = [
   { id: "ALL", label: "Todos" },

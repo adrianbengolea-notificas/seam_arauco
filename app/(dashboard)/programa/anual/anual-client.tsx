@@ -21,6 +21,7 @@ import { usePermisos } from "@/lib/permisos/usePermisos";
 import { cn } from "@/lib/utils";
 import { usePlanesPreventivosLive } from "@/modules/scheduling/use-planes-preventivos-live";
 import type { Especialidad } from "@/modules/notices/types";
+import { ETIQUETA_ESPECIALIDAD_DOMINIO } from "@/modules/scheduling/especialidad-programa";
 import { getIsoWeekId, listaSemanasIsoEnAnoCalendario, semanaLabelDesdeIso } from "@/modules/scheduling/iso-week";
 import { useAuthUser, useUserProfile, getClientIdToken } from "@/modules/users/hooks";
 import { isSuperAdminRole } from "@/modules/users/roles";
@@ -44,10 +45,10 @@ const FREC_OPTS: { value: FiltroFrec; label: string }[] = [
 
 const ESP_OPTS: { value: FiltroEsp; label: string }[] = [
   { value: "todas", label: "Todas" },
-  { value: "AA", label: "AA" },
-  { value: "ELECTRICO", label: "Eléctrico" },
-  { value: "GG", label: "GG" },
-  { value: "HG", label: "HG" },
+  ...(["AA", "ELECTRICO", "GG", "HG"] as const).map((value) => ({
+    value,
+    label: ETIQUETA_ESPECIALIDAD_DOMINIO[value],
+  })),
 ];
 
 const ESP_DISPLAY: Partial<Record<Especialidad, string>> = {
@@ -57,12 +58,7 @@ const ESP_DISPLAY: Partial<Record<Especialidad, string>> = {
   HG: "HG",
 };
 
-const ESP_LABEL_LARGO: Partial<Record<Especialidad, string>> = {
-  AA: "Aire acondicionado",
-  ELECTRICO: "Eléctrico",
-  GG: "Grupos generadores",
-  HG: "HG",
-};
+const ESP_LABEL_LARGO: Partial<Record<Especialidad, string>> = ETIQUETA_ESPECIALIDAD_DOMINIO;
 
 const ORDEN_ESP: Especialidad[] = ["AA", "ELECTRICO", "GG", "HG"];
 

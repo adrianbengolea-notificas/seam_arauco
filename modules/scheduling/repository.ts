@@ -419,6 +419,55 @@ export async function removeAvisoFromProgramaSemanaAdmin(input: {
 }
 
 /**
+ * Vincula `workOrderId` al aviso ya publicado en la grilla (no agrega un ítem nuevo).
+ * @returns `true` si se actualizó al menos un chip coincidente.
+ */
+export async function setWorkOrderIdEnProgramaSemanaAdmin(input: {
+  programaDocId: string;
+  localidad: string;
+  dia: DiaSemanaPrograma;
+  especialidad: EspecialidadPrograma;
+  avisoNumero: string;
+  avisoFirestoreId?: string | null;
+  workOrderId: string;
+}): Promise<boolean> {
+  const woId = input.workOrderId.trim();
+  if (!woId) return false;
+  const ref = getAdminDb().collection(COLLECTIONS.programa_semanal).doc(input.programaDocId.trim());
+  return getAdminDb().runTransaction(async (txn) => {
+    const snap = await txn.get(ref);
+    if (!snap.exists) return false;
+    const raw = snap.data() as Record<string, unknown>;
+    const slots = cloneSlotsShallow(((raw.slots as SlotSemanal[]) ?? []) as SlotSemanal[]);
+    const loc = normLocalidadPrograma(input.localidad);
+    const idx = findSlotIndexByKey(slots, loc, input.dia, input.especialidad);
+    if (idx < 0) return false;
+    const cur = slots[idx]!;
+    const avisos = [...(cur.avisos ?? [])];
+    let changed = false;
+    for (let i = 0; i < avisos.length; i++) {
+      const a = avisos[i]!;
+      if (a.numero !== input.avisoNumero) continue;
+      const fid = a.avisoFirestoreId?.trim();
+      const want = input.avisoFirestoreId?.trim();
+      if (want && fid && fid !== want) continue;
+      if (a.workOrderId?.trim() === woId) return true;
+      avisos[i] = { ...a, workOrderId: woId };
+      changed = true;
+      break;
+    }
+    if (!changed) return false;
+    const nextSlots = [...slots];
+    nextSlots[idx] = { ...cur, avisos };
+    txn.update(ref, {
+      slots: nextSlots,
+      updated_at: FieldValue.serverTimestamp(),
+    } as Record<string, unknown>);
+    return true;
+  });
+}
+
+/**
  * Quita el vínculo `workOrderId` del aviso en la celda publicada (el aviso permanece en el programa).
  */
 export async function clearWorkOrderIdEnProgramaSemanaAdmin(input: {

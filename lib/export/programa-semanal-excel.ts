@@ -1,5 +1,5 @@
 import type { ProgramaSemana, SlotSemanal } from "@/modules/scheduling/types";
-import { etiquetaLocalidadSlot } from "@/lib/format/localidad-programa";
+import { etiquetaLocalidadExport } from "@/lib/format/localidad-programa";
 import { parseIsoWeekIdFromSemanaParam, parseIsoWeekToBounds } from "@/modules/scheduling/iso-week";
 
 const DIAS = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado"] as const;
@@ -29,13 +29,18 @@ type GrupoLocalidad = {
   }[];
 };
 
-function agruparSlots(slots: SlotSemanal[]): GrupoLocalidad[] {
-  const mapLoc = new Map<string, Map<string, Map<DiaExport, string[]>>>();
+function agruparSlots(slots: SlotSemanal[], centroPrograma?: string): GrupoLocalidad[] {
+  const mapLoc = new Map<
+    string,
+    { mapEsp: Map<string, Map<DiaExport, string[]>>; slotRef: SlotSemanal }
+  >();
 
   for (const slot of slots) {
     const loc = (slot.localidad?.trim() || "—");
-    if (!mapLoc.has(loc)) mapLoc.set(loc, new Map());
-    const mapEsp = mapLoc.get(loc)!;
+    if (!mapLoc.has(loc)) {
+      mapLoc.set(loc, { mapEsp: new Map(), slotRef: slot });
+    }
+    const mapEsp = mapLoc.get(loc)!.mapEsp;
 
     const esp = slot.especialidad?.trim() || "—";
     if (!mapEsp.has(esp)) mapEsp.set(esp, new Map());
@@ -64,8 +69,8 @@ function agruparSlots(slots: SlotSemanal[]): GrupoLocalidad[] {
   }
 
   const grupos: GrupoLocalidad[] = [];
-  for (const [loc, mapEsp] of mapLoc) {
-    const etiqueta = etiquetaLocalidadSlot(loc);
+  for (const [loc, { mapEsp, slotRef }] of mapLoc) {
+    const etiqueta = etiquetaLocalidadExport(slotRef, centroPrograma);
     const especialidades = [];
     for (const [esp, mapDia] of mapEsp) {
       const porDia = {} as Record<DiaExport, string>;
@@ -150,7 +155,7 @@ export async function exportarProgramaSemanalExcel(programa: ProgramaSemana): Pr
   });
 
   // ── Filas de datos ────────────────────────────────────────────────────────
-  const grupos = agruparSlots(programa.slots ?? []);
+  const grupos = agruparSlots(programa.slots ?? [], programa.centro);
 
   for (const grupo of grupos) {
     const startRow = ws.rowCount + 1;

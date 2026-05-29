@@ -1,3 +1,5 @@
+import { CENTRO_SELECTOR_TODAS_PLANTAS, KNOWN_CENTROS } from "@/lib/config/app-config";
+
 /**
  * Etiqueta legible para filas de localidad en el programa semanal cuando solo hay código SAP/path.
  * Toma las últimas 2–3 partes y aplica expansiones mínimas (p. ej. LABORA → Laboratorio).
@@ -137,4 +139,80 @@ export function etiquetaLocalidadSlot(
   const denom = denomUbicTecnica?.trim();
   if (denom) return denom;
   return formatearCodigoLocalidadSap(localidadRaw);
+}
+
+function centroDesdeProgramaDocId(programaDocId: string): string | null {
+  const id = programaDocId.trim();
+  if (!id) return null;
+  const sorted = [...KNOWN_CENTROS].sort((a, b) => b.length - a.length);
+  for (const c of sorted) {
+    if (id.startsWith(`${c}_`)) return c;
+  }
+  return null;
+}
+
+function parsePrefijoCentroEnLocalidadFusion(localidadGrid: string): { centro: string | null; resto: string } {
+  const t = localidadGrid.trim();
+  const sorted = [...KNOWN_CENTROS].sort((a, b) => b.length - a.length);
+  for (const c of sorted) {
+    const prefix = `${c} · `;
+    if (t.startsWith(prefix)) {
+      return { centro: c.toUpperCase(), resto: t.slice(prefix.length).trim() };
+    }
+  }
+  return { centro: null, resto: t };
+}
+
+/**
+ * Ubicación técnica para export (Excel): segmentos SAP en mayúsculas, sin denominación legible.
+ * Misma heurística de recorte que la grilla, pero sin expandir CEL → Celulosa, etc.
+ */
+export function formatearUbicacionTecnicaExport(codigo: string): string {
+  const t = codigo.trim();
+  if (!t || t === "—") return "—";
+  const parts = partesCodigoLocalidad(t);
+  if (parts.length === 0) return t.toUpperCase();
+
+  const take = cantidadPartesFinales(parts.length);
+  const slice = parts.slice(-take);
+  return slice.map((p) => p.toUpperCase()).join(" · ");
+}
+
+type SlotLocalidadExport = {
+  localidad: string;
+  localidadDocPrograma?: string;
+  programaOrigenDocId?: string;
+};
+
+/**
+ * Columna «Localidad» del Excel del programa: SECO en mayúsculas (fusión multi-planta) + códigos UT.
+ * No usa `denomUbicTecnica` (descripción SAP). Si falta UT, devuelve solo el SECO.
+ */
+export function etiquetaLocalidadExport(
+  slot: SlotLocalidadExport,
+  centroPrograma?: string | null,
+): string {
+  const locGrid = slot.localidad?.trim() || "—";
+  const { centro: centroFusion, resto } = parsePrefijoCentroEnLocalidadFusion(locGrid);
+  const utRaw = slot.localidadDocPrograma?.trim() || resto;
+
+  let centro = centroFusion;
+  if (!centro && slot.programaOrigenDocId?.trim()) {
+    centro = centroDesdeProgramaDocId(slot.programaOrigenDocId)?.toUpperCase() ?? null;
+  }
+  if (!centro) {
+    const cp = centroPrograma?.trim();
+    if (cp && cp !== CENTRO_SELECTOR_TODAS_PLANTAS) {
+      centro = cp.toUpperCase();
+    }
+  }
+
+  const utFmt = formatearUbicacionTecnicaExport(utRaw);
+  const esFusion = Boolean(centroFusion || slot.programaOrigenDocId?.trim());
+  const seco = centroFusion ?? centro;
+
+  if (utFmt && utFmt !== "—") {
+    return esFusion && seco ? `${seco} · ${utFmt}` : utFmt;
+  }
+  return seco ?? "—";
 }

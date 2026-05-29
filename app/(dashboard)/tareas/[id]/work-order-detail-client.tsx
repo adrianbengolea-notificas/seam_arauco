@@ -322,7 +322,10 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
         return;
       }
       setEmpOpen(false);
-      setMsg("Empalme registrado: la orden figura como completada con la fecha indicada.");
+      router.refresh();
+      setMsg(
+        "Empalme registrado: la orden quedó completada y el aviso SAP vinculado se cerró con la fecha indicada.",
+      );
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Error al registrar empalme");
     } finally {

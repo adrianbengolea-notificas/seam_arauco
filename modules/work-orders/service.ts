@@ -25,13 +25,13 @@ import {
   destinatariosSupervisoresAdmin,
 } from "@/lib/notificaciones/destinatarios";
 import {
-  avisoFirestoreDocId,
   diasParaVencimientoDesdeProximo,
   diasPorMtsa,
   estadoVencimientoDesdeDias,
   inferMtsaDesdeAviso,
   proximoVencimientoDesdeFecha,
 } from "@/lib/vencimientos";
+import { resolveAvisoVinculadoAWorkOrder } from "@/modules/work-orders/resolve-aviso-vinculado";
 import {
   diaProgramaADiaIsoSemana,
   getIsoWeekId,
@@ -1176,7 +1176,35 @@ export type WorkOrderPadCloseFollowUpOptions = {
   /** Fecha real del trabajo: aviso/plan usan esta base en lugar de “ahora” (cierre histórico). */
   fechaEjecucionReferencia?: Date;
   notificacion?: "firmada" | "empalme_documentado";
+  /** Avisos SAP adicionales a cerrar (p. ej. duplicado que esperaba esta OT). */
+  avisoIdsAdicionalesCerrar?: string[];
 };
+
+async function aplicarCierreAvisoTrasOtCerrada(input: {
+  aviso: Aviso;
+  wo: WorkOrder;
+  fechaEjecucion?: Date;
+}): Promise<void> {
+  const mtsa = inferMtsaDesdeAviso(input.aviso);
+  const fechaBaseParaProximo = input.fechaEjecucion ?? new Date();
+  const proximo = proximoVencimientoDesdeFecha(fechaBaseParaProximo, mtsa);
+  const hoy = new Date();
+  const dias = diasParaVencimientoDesdeProximo(proximo, hoy);
+  await updateAviso(input.aviso.id, {
+    estado: "CERRADO" as Aviso["estado"],
+    work_order_id: FieldValue.delete(),
+    ultima_ejecucion_ot_id: input.wo.id,
+    ultima_ejecucion_fecha: (
+      input.fechaEjecucion != null
+        ? AdminTimestamp.fromDate(input.fechaEjecucion)
+        : AdminTimestamp.now()
+    ) as unknown as Aviso["ultima_ejecucion_fecha"],
+    proximo_vencimiento: AdminTimestamp.fromDate(proximo) as unknown as Aviso["proximo_vencimiento"],
+    dias_para_vencimiento: dias,
+    estado_vencimiento: estadoVencimientoDesdeDias(dias),
+    antecesor_orden_abierta: FieldValue.delete(),
+  });
+}
 
 /** Efectos posteriores al cierre con pads (aviso, plan de mantenimiento, notificaciones). Idempotente si el aviso ya está cerrado. */
 export async function runWorkOrderPadCloseFollowUp(
@@ -1187,27 +1215,34 @@ export async function runWorkOrderPadCloseFollowUp(
   if (!wo || wo.estado !== "CERRADA") return;
 
   const fechaEjecucion = opts?.fechaEjecucionReferencia;
-  const avisoKey = wo.aviso_id?.trim() || (wo.aviso_numero ? avisoFirestoreDocId(wo.aviso_numero) : "");
-  const aviso = avisoKey ? await getAvisoById(avisoKey) : null;
-  if (avisoKey && aviso) {
-    const mtsa = inferMtsaDesdeAviso(aviso);
-    const fechaBaseParaProximo = fechaEjecucion ?? new Date();
-    const proximo = proximoVencimientoDesdeFecha(fechaBaseParaProximo, mtsa);
-    const hoy = new Date();
-    const dias = diasParaVencimientoDesdeProximo(proximo, hoy);
-    await updateAviso(aviso.id, {
-      estado: "CERRADO" as Aviso["estado"],
-      ultima_ejecucion_ot_id: wo.id,
-      ultima_ejecucion_fecha: (
-        fechaEjecucion != null
-          ? AdminTimestamp.fromDate(fechaEjecucion)
-          : AdminTimestamp.now()
-      ) as unknown as Aviso["ultima_ejecucion_fecha"],
-      proximo_vencimiento: AdminTimestamp.fromDate(proximo) as unknown as Aviso["proximo_vencimiento"],
-      dias_para_vencimiento: dias,
-      estado_vencimiento: estadoVencimientoDesdeDias(dias),
-    });
+  const esEmpalme = opts?.notificacion === "empalme_documentado";
+  const aviso = await resolveAvisoVinculadoAWorkOrder(wo);
+
+  const esperabaAviso =
+    wo.provisorio_sin_aviso_sap !== true &&
+    Boolean(wo.aviso_id?.trim() || wo.aviso_numero?.trim());
+  if (esEmpalme && esperabaAviso && !aviso) {
+    throw new AppError(
+      "NOT_FOUND",
+      "No se encontró el aviso vinculado a esta orden; el empalme cerró la OT pero el aviso SAP quedó sin actualizar.",
+      { details: { workOrderId, aviso_id: wo.aviso_id, aviso_numero: wo.aviso_numero } },
+    );
   }
+
+  const avisosACerrar = new Map<string, Aviso>();
+  if (aviso) avisosACerrar.set(aviso.id, aviso);
+  for (const id of opts?.avisoIdsAdicionalesCerrar ?? []) {
+    const t = id.trim();
+    if (!t || avisosACerrar.has(t)) continue;
+    const extra = await getAvisoById(t);
+    if (extra && extra.estado !== "ANULADO") avisosACerrar.set(extra.id, extra);
+  }
+
+  for (const a of avisosACerrar.values()) {
+    await aplicarCierreAvisoTrasOtCerrada({ aviso: a, wo, fechaEjecucion });
+  }
+
+  const avisoKey = aviso?.id ?? wo.aviso_id?.trim() ?? "";
   const planKey = (wo.plan_id?.trim() || avisoKey).trim();
   if (planKey) {
     const plan = await getPlanMantenimientoAdmin(planKey);
@@ -1230,7 +1265,6 @@ export async function runWorkOrderPadCloseFollowUp(
     ...(await destinatariosClienteArauco(wo.centro)),
     ...(await destinatariosSupervisoresAdmin(wo.centro)),
   ];
-  const esEmpalme = opts?.notificacion === "empalme_documentado";
   crearNotificacionSeguro(dest, {
     tipo: "ot_cerrada_firmada",
     titulo: esEmpalme
@@ -1314,10 +1348,23 @@ export async function closeWorkOrderHistorico(input: {
     },
   });
 
+  const woPre = await getWorkOrderById(input.workOrderId);
+  const avisoIdsAdicionalesCerrar = new Set<string>();
+  if (woPre?.alerta_cerrar_para_aviso_sap?.aviso_id?.trim()) {
+    avisoIdsAdicionalesCerrar.add(woPre.alerta_cerrar_para_aviso_sap.aviso_id.trim());
+  }
+  const snapAntecesor = await getAdminDb()
+    .collection(COLLECTIONS.avisos)
+    .where("antecesor_orden_abierta.work_order_id", "==", input.workOrderId)
+    .limit(80)
+    .get();
+  for (const d of snapAntecesor.docs) avisoIdsAdicionalesCerrar.add(d.id);
+
   await limpiarAntecesorAlCerrarOrden(input.workOrderId);
   await runWorkOrderPadCloseFollowUp(input.workOrderId, {
     fechaEjecucionReferencia: input.fechaEjecucion,
     notificacion: "empalme_documentado",
+    avisoIdsAdicionalesCerrar: [...avisoIdsAdicionalesCerrar],
   });
 }
 

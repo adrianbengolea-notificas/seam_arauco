@@ -11,6 +11,7 @@ import { useCentroConfigLive } from "@/modules/centros/hooks";
 import type { Aviso, Especialidad, FrecuenciaMantenimiento } from "@/modules/notices/types";
 import { ETIQUETA_ESPECIALIDAD_DOMINIO } from "@/modules/scheduling/especialidad-programa";
 import { useAssetLive, useAssetsLive } from "@/modules/assets/hooks";
+import type { Asset } from "@/modules/assets/types";
 import { getClientIdToken, useAuth } from "@/modules/users/hooks";
 import { toPermisoRol } from "@/lib/permisos/index";
 import type { WorkOrderSubTipo } from "@/modules/work-orders/types";
@@ -110,6 +111,36 @@ async function searchAvisosParaOt(
     .slice(0, 12);
 }
 
+function filterAssetsLocal(assets: Asset[], needle: string, max = 15): Asset[] {
+  const n = needle.trim().toLowerCase();
+  if (!n.length) return assets.slice(0, max);
+  return assets
+    .filter(
+      (a) =>
+        (a.codigo_nuevo ?? "").toLowerCase().includes(n) ||
+        (a.codigo_legacy ?? "").toLowerCase().includes(n) ||
+        (a.denominacion ?? "").toLowerCase().includes(n),
+    )
+    .slice(0, max);
+}
+
+async function fetchAssetByCodigoExact(
+  db: ReturnType<typeof getFirebaseDb>,
+  codigo: string,
+  centro: string,
+): Promise<Asset | null> {
+  const trimmed = codigo.trim();
+  if (!trimmed) return null;
+  const c = centro.trim();
+  const q = c.length
+    ? query(collection(db, "assets"), where("centro", "==", c), where("codigo_nuevo", "==", trimmed), limit(1))
+    : query(collection(db, "assets"), where("codigo_nuevo", "==", trimmed), limit(1));
+  const snap = await getDocs(q);
+  if (snap.empty) return null;
+  const d = snap.docs[0]!;
+  return { id: d.id, ...(d.data() as Omit<Asset, "id">) };
+}
+
 const ESP_OPTS: { value: Especialidad; label: string }[] = (
   ["AA", "ELECTRICO", "GG", "HG"] as const
 ).map((value) => ({ value, label: ETIQUETA_ESPECIALIDAD_DOMINIO[value] }));
@@ -181,6 +212,13 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
     avisoIdRef.current = avisoId;
   }, [avisoId]);
 
+  const [assetQuery, setAssetQuery] = useState("");
+  const [assetHits, setAssetHits] = useState<Asset[]>([]);
+  const assetIdRef = useRef("");
+  useEffect(() => {
+    assetIdRef.current = assetId;
+  }, [assetId]);
+
   const applyAviso = useCallback(
     (a: Aviso) => {
       if (esSuperadmin) {
@@ -218,6 +256,26 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
     setAvisoHits([]);
     setNotas("");
     setFrecBadge("");
+  }, []);
+
+  const applyAsset = useCallback((a: Asset) => {
+    setAssetId(a.id);
+    setAssetQuery(a.codigo_nuevo ?? "");
+    setActivoManualDescripcion("");
+    setAssetHits([]);
+  }, []);
+
+  const selectOtroFueraCatalogo = useCallback(() => {
+    setAssetId(ASSET_OTRO_FUERA_CATALOGO);
+    setAssetQuery("");
+    setAssetHits([]);
+  }, []);
+
+  const unlinkAsset = useCallback(() => {
+    setAssetId("");
+    setAssetQuery("");
+    setAssetHits([]);
+    setActivoManualDescripcion("");
   }, []);
 
   useEffect(() => {
@@ -287,6 +345,52 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
     () => assetOptions.find((a) => a.id === assetId),
     [assetOptions, assetId],
   );
+
+  useEffect(() => {
+    if (!assetId || assetId === ASSET_OTRO_FUERA_CATALOGO) return;
+    const codigo = selectedAsset?.codigo_nuevo ?? assetDocPorId?.codigo_nuevo;
+    if (codigo) setAssetQuery(codigo);
+  }, [assetId, selectedAsset?.codigo_nuevo, assetDocPorId?.codigo_nuevo]);
+
+  useEffect(() => {
+    if (assetId && assetId !== ASSET_OTRO_FUERA_CATALOGO) {
+      setAssetHits([]);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      const trimmed = assetQuery.trim();
+      if (trimmed.length < 1) {
+        setAssetHits([]);
+        return;
+      }
+      void (async () => {
+        let hits = filterAssetsLocal(assetOptions, trimmed);
+        const exactLocal = hits.find((a) => (a.codigo_nuevo ?? "").toLowerCase() === trimmed.toLowerCase());
+        if (!exactLocal && trimmed.length >= 2) {
+          const db = getFirebaseDb();
+          const remote = await fetchAssetByCodigoExact(db, trimmed, centro);
+          if (remote && !hits.some((h) => h.id === remote.id)) {
+            hits = [remote, ...hits].slice(0, 15);
+          }
+          if (remote && !cancelled && !assetIdRef.current) {
+            applyAsset(remote);
+            return;
+          }
+        }
+        if (cancelled) return;
+        setAssetHits(hits);
+        const exact = hits.find((a) => (a.codigo_nuevo ?? "").toLowerCase() === trimmed.toLowerCase());
+        if (exact && !assetIdRef.current) {
+          applyAsset(exact);
+        }
+      })();
+    }, 280);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [assetQuery, assetOptions, centro, assetId, applyAsset]);
 
   const conflictoActivoCentro = useMemo(() => {
     if (!assetId.trim() || !assetDocPorId || assetDocPorId.id !== assetId) return null;
@@ -402,7 +506,7 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
           )}
           .{" "}
           <strong>Preventivo</strong>: empezá por el número de aviso; al vincularlo se completa la planta y el resto.{" "}
-          Elegí <strong className="text-foreground">un activo del listado</strong>.{" "}
+          Elegí <strong className="text-foreground">un activo del listado</strong> (buscá por código o nombre).{" "}
           <strong>Correctivo</strong>: si el equipo no está cargado como activo, elegí «Otro (fuera del listado)» y describilo;
           provisional: podés omitir aviso SAP si corresponde; completá equipo y descripción.
         </p>
@@ -561,30 +665,91 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
         ) : null}
 
         <div className="space-y-1">
-          <label className="text-sm font-medium">Equipo (activo)</label>
-          <select
-            className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-            value={assetId}
-            disabled={assetsLoading && !assetOptions.length && !assetId}
-            onChange={(e) => setAssetId(e.target.value)}
-          >
-            <option value="">Seleccionar…</option>
-            {subTipo === "correctivo" ? (
-              <option value={ASSET_OTRO_FUERA_CATALOGO}>Otro — fuera del listado (describir manualmente)</option>
-            ) : null}
-            {assetOptions.map((ast) => (
-              <option key={ast.id} value={ast.id}>
-                {ast.codigo_nuevo ?? ""} · {(ast.denominacion ?? "").slice(0, 48)}
-              </option>
-            ))}
-          </select>
+          <label className="text-sm font-medium" htmlFor="nueva-ot-equipo">
+            Equipo (activo)
+          </label>
+          {assetId && assetId !== ASSET_OTRO_FUERA_CATALOGO && (selectedAsset || assetDocPorId) ? (
+            <div className="rounded-lg border border-border bg-muted/50 px-3 py-2.5 text-sm shadow-sm">
+              <p className="leading-snug">
+                <span className="font-mono font-semibold">
+                  {(selectedAsset ?? assetDocPorId)?.codigo_nuevo ?? assetId}
+                </span>
+                {(selectedAsset ?? assetDocPorId)?.denominacion?.trim() ? (
+                  <span className="text-foreground">
+                    {" "}
+                    {(selectedAsset ?? assetDocPorId)!.denominacion.slice(0, 72)}
+                    {(selectedAsset ?? assetDocPorId)!.denominacion.length > 72 ? "…" : ""}
+                  </span>
+                ) : null}
+              </p>
+              <button
+                type="button"
+                className="mt-2 cursor-pointer text-left text-xs font-medium text-brand underline underline-offset-2 hover:opacity-90"
+                onClick={unlinkAsset}
+              >
+                Cambiar equipo
+              </button>
+            </div>
+          ) : assetId === ASSET_OTRO_FUERA_CATALOGO ? (
+            <div className="rounded-lg border border-border bg-muted/50 px-3 py-2.5 text-sm shadow-sm">
+              <p className="leading-snug text-muted-foreground">Otro — fuera del listado (descripción manual)</p>
+              <button
+                type="button"
+                className="mt-2 cursor-pointer text-left text-xs font-medium text-brand underline underline-offset-2 hover:opacity-90"
+                onClick={unlinkAsset}
+              >
+                Buscar en el listado de equipos
+              </button>
+            </div>
+          ) : (
+            <>
+              <Input
+                id="nueva-ot-equipo"
+                value={assetQuery}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setAssetQuery(v);
+                  if (assetId && v.trim() !== (selectedAsset?.codigo_nuevo ?? "").trim()) {
+                    setAssetId("");
+                    setAssetHits([]);
+                  }
+                }}
+                placeholder="Código del equipo o nombre — ej. EE-001"
+                autoComplete="off"
+                disabled={assetsLoading && !assetOptions.length}
+              />
+              {assetHits.length ? (
+                <ul
+                  className="max-h-48 overflow-auto rounded-lg border border-border bg-muted/40 text-sm shadow-sm"
+                  role="listbox"
+                  aria-label="Resultados de equipo"
+                >
+                  {assetHits.map((hit) => (
+                    <li key={hit.id} className="border-b border-border last:border-b-0">
+                      <button
+                        type="button"
+                        className="min-h-11 w-full cursor-pointer touch-manipulation px-3 py-2.5 text-left hover:bg-zinc-100/90 active:bg-zinc-200/80 dark:hover:bg-zinc-800/90 dark:active:bg-zinc-700/80"
+                        onClick={() => applyAsset(hit)}
+                      >
+                        <span className="font-mono font-semibold">{hit.codigo_nuevo}</span>
+                        <span className="mt-0.5 block text-muted-foreground sm:mt-0 sm:ml-2 sm:inline">
+                          {(hit.denominacion ?? "").slice(0, 72)}
+                          {(hit.denominacion ?? "").length > 72 ? "…" : ""}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </>
+          )}
           {assetsLoading ? (
             <p className="text-xs text-muted-foreground">Cargando equipos de {nombreCentro(centro)}…</p>
           ) : null}
           {assetsError ? (
             <p className="text-xs text-red-600">{assetsError.message}</p>
           ) : null}
-          {!assetsLoading && !assetsError && !assetOptions.length ? (
+          {!assetsLoading && !assetsError && !assetOptions.length && !assetId ? (
             <p className="text-xs text-amber-800 dark:text-amber-200">
               No hay activos en la base para la planta{" "}
               <span className="font-medium">{nombreCentro(centro)}</span>
@@ -593,6 +758,13 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
               alcanza). Revisá el maestro de activos: cada equipo debe tener la especialidad correcta.
             </p>
           ) : null}
+          <p className="text-xs text-muted-foreground">
+            {assetId && assetId !== ASSET_OTRO_FUERA_CATALOGO
+              ? `Equipo seleccionado · planta ${nombreCentro(centro)}`
+              : assetId === ASSET_OTRO_FUERA_CATALOGO
+                ? "Correctivo sin activo en maestro: completá la descripción abajo."
+                : "Escribí el código SAP del equipo; al coincidir exacto se selecciona solo. También podés buscar por nombre."}
+          </p>
           {conflictoActivoCentro ? (
             <p className="text-xs text-amber-800 dark:text-amber-200">
               El activo seleccionado pertenece a la planta{" "}
@@ -612,6 +784,15 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
               )}
             </p>
           ) : null}
+          {subTipo === "correctivo" && assetId !== ASSET_OTRO_FUERA_CATALOGO ? (
+            <button
+              type="button"
+              className="cursor-pointer text-left text-xs font-medium text-brand underline underline-offset-2 hover:opacity-90"
+              onClick={selectOtroFueraCatalogo}
+            >
+              El equipo no está en el listado — describir manualmente
+            </button>
+          ) : null}
           {subTipo === "correctivo" && assetId === ASSET_OTRO_FUERA_CATALOGO ? (
             <div className="space-y-1 pt-2">
               <label className="text-sm font-medium" htmlFor="nueva-ot-activo-manual">
@@ -629,11 +810,6 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
                 Solo para correctivos cuando el equipo no está en maestro. Preventivos y checklist requieren un activo cargado en el sistema.
               </p>
             </div>
-          ) : null}
-          {selectedAsset ? (
-            <p className="text-xs text-muted-foreground">
-              Código: <span className="font-mono">{selectedAsset.codigo_nuevo}</span>
-            </p>
           ) : null}
         </div>
 

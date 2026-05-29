@@ -3,6 +3,7 @@
 import {
   actionMoveAvisoEnProgramaPublicado,
   actionRemoveAvisoFromProgramaPublicado,
+  actionSearchAvisoEnProgramaSemanal,
 } from "@/app/actions/schedule";
 import { actionArchiveWorkOrder } from "@/app/actions/work-orders";
 import { ProgramaSeccionNav } from "@/app/(dashboard)/programa/programa-seccion-nav";
@@ -28,6 +29,11 @@ import { etiquetaLocalidadSlot } from "@/lib/format/localidad-programa";
 import { cn } from "@/lib/utils";
 import { useAvisoLive } from "@/modules/notices/hooks";
 import { useAvisosWorkOrderIdsByDocIds } from "@/modules/notices/use-avisos-work-order-ids";
+import {
+  avisoPasaBusqueda,
+  busquedaProgramaListaParaCrossWeek,
+  type ContextoBusquedaAvisoPrograma,
+} from "@/modules/scheduling/busqueda-programa-aviso";
 import {
   useProgramaSemana,
   useProgramaSemanaFusion,
@@ -309,44 +315,23 @@ function avisoPasaFiltros(a: AvisoSlot, tipo: FiltroTipo): boolean {
   return avisoPasaTipo(a, tipo);
 }
 
-type ContextoBusquedaAvisoPrograma = {
-  localidad?: string;
-  denomUbicTecnica?: string;
-  especialidad?: EspecialidadPrograma;
-};
-
-function textoBusquedaAvisoEnPrograma(a: AvisoSlot, ctx?: ContextoBusquedaAvisoPrograma): string {
-  const esp =
-    ctx?.especialidad === "Electrico"
-      ? "electrico eléctrico"
-      : ctx?.especialidad === "Aire"
-        ? "aire"
-        : ctx?.especialidad === "GG"
-          ? "gg"
-          : ctx?.especialidad === "HG"
-            ? "hg hidrogrua hidrogrúa"
-            : "";
-  return [
-    a.numero,
-    a.descripcion,
-    a.equipoCodigo,
-    a.ubicacion,
-    ctx?.localidad,
-    ctx?.denomUbicTecnica,
-    esp,
-  ]
-    .filter((x) => typeof x === "string" && x.trim())
-    .join(" ")
-    .toLowerCase();
-}
-
-function avisoPasaBusqueda(a: AvisoSlot, busqueda: string, ctx?: ContextoBusquedaAvisoPrograma): boolean {
-  const q = busqueda.trim().toLowerCase();
-  if (!q) return true;
-  if (textoBusquedaAvisoEnPrograma(a, ctx).includes(q)) return true;
-  const qNum = q.replace(/\s/g, "");
-  const num = a.numero.replace(/\s/g, "").toLowerCase();
-  return Boolean(qNum && num.includes(qNum));
+function semanaActualTieneCoincidenciaBusqueda(
+  programa: ProgramaSemana | null | undefined,
+  busqueda: string,
+): boolean {
+  const q = busqueda.trim();
+  if (!q || !programa?.slots?.length) return false;
+  for (const slot of programa.slots) {
+    const ctx: ContextoBusquedaAvisoPrograma = {
+      localidad: slot.localidad,
+      denomUbicTecnica: slot.denomUbicTecnica,
+      especialidad: slot.especialidad,
+    };
+    for (const aviso of slot.avisos ?? []) {
+      if (avisoPasaBusqueda(aviso, q, ctx)) return true;
+    }
+  }
+  return false;
 }
 
 type CeldaAvisoPrograma = { aviso: AvisoSlot; especialidad: EspecialidadPrograma; programaDocId?: string };
@@ -1693,6 +1678,88 @@ export function ProgramaClient() {
     return programa;
   }, [programa, centroEfectivo, vistaTodasPlantas]);
 
+  const crossWeekBusquedaSeqRef = useRef(0);
+
+  /** Si el aviso no está en la semana visible, busca en todas las publicadas y salta a la semana correcta. */
+  useEffect(() => {
+    const q = busqueda.trim();
+    if (!busquedaProgramaListaParaCrossWeek(q)) return;
+    if (!user?.uid) return;
+    if (programaLoading) return;
+
+    const centroBusqueda =
+      !vistaTodasPlantas &&
+      centroEfectivo.trim() &&
+      centroEfectivo !== CENTRO_SELECTOR_TODAS_PLANTAS &&
+      isCentroInKnownList(centroEfectivo)
+        ? centroEfectivo.trim()
+        : undefined;
+
+    if (!vistaTodasPlantas && !centroBusqueda) return;
+    if (semanaActualTieneCoincidenciaBusqueda(programaParaGrilla, q)) return;
+
+    const seq = ++crossWeekBusquedaSeqRef.current;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const tok = await getClientIdToken();
+          if (!tok || seq !== crossWeekBusquedaSeqRef.current) return;
+          const res = await actionSearchAvisoEnProgramaSemanal(tok, {
+            query: q,
+            ...(centroBusqueda ? { centro: centroBusqueda } : {}),
+          });
+          if (seq !== crossWeekBusquedaSeqRef.current) return;
+          if (!res.ok || !res.data.length) return;
+
+          const hit = res.data[0]!;
+          if (semanaIso && hit.isoSemana === semanaIso) return;
+
+          if (vistaTodasPlantas) {
+            if (semanaId === hit.isoSemana) return;
+            setSemanaIdElegida(hit.isoSemana);
+            const p = new URLSearchParams(searchParams.toString());
+            p.set("semana", hit.isoSemana);
+            p.delete("vista");
+            const qs = p.toString();
+            void router.replace(qs ? `/programa?${qs}` : "/programa", { scroll: false });
+            return;
+          }
+
+          const docDestino =
+            (hit.programaDocId && semanasSingle.some((s) => s.id === hit.programaDocId)
+              ? hit.programaDocId
+              : null) ??
+            idDocumentoDesdeParamSemana(semanasSingle, hit.isoSemana) ??
+            (centroBusqueda ? propuestaSemanaDocId(centroBusqueda, hit.isoSemana) : hit.isoSemana);
+
+          if (semanaId === docDestino) return;
+          setSemanaIdElegida(docDestino);
+          const p = new URLSearchParams(searchParams.toString());
+          p.set("semana", docDestino);
+          p.delete("vista");
+          const qs = p.toString();
+          void router.replace(qs ? `/programa?${qs}` : "/programa", { scroll: false });
+        } catch {
+          /* búsqueda auxiliar: fallo silencioso */
+        }
+      })();
+    }, 450);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    busqueda,
+    user?.uid,
+    programaLoading,
+    programaParaGrilla,
+    vistaTodasPlantas,
+    centroEfectivo,
+    semanaIso,
+    semanaId,
+    semanasSingle,
+    searchParams,
+    router,
+  ]);
+
   const avisoFirestoreIdsParaSyncWo = useMemo(() => {
     if (!programaParaGrilla?.slots?.length) return [];
     const s = new Set<string>();
@@ -2307,9 +2374,11 @@ export function ProgramaClient() {
             <div className="block space-y-2 text-left normal-case">
               <p>
                 <strong>Planta</strong> y <strong>Semana</strong> eligen qué programa cargar; el resto acota qué filas y
-                chips ves en la tabla. La <strong>búsqueda</strong> filtra por número de aviso o texto libre (descripción,
-                equipo, ubicación, fila de localidad). <strong>Especialidad</strong>, <strong>día</strong> y{" "}
-                <strong>tipo</strong> filtran la grilla; <strong>estado operativo</strong> incluye las etapas de la leyenda
+                chips ves en la tabla. La <strong>búsqueda</strong> filtra por número de aviso o texto libre y, si no
+                está en la semana visible, busca en <strong>todas las semanas publicadas</strong> y salta a la que
+                corresponda (descripción, equipo, ubicación, fila de localidad). <strong>Especialidad</strong>,{" "}
+                <strong>día</strong> y <strong>tipo</strong> filtran la grilla; <strong>estado operativo</strong> incluye
+                las etapas de la leyenda
                 (colores del chip) y la
                 opción <strong>orden previa (SAP)</strong>: solo avisos con el aro rojo (nuevo aviso mientras sigue{" "}
                 <strong>abierta</strong> una orden del mismo mantenimiento). Para{" "}
@@ -2337,10 +2406,10 @@ export function ProgramaClient() {
             />
             <Input
               className="h-9 pl-7 text-sm font-normal normal-case"
-              placeholder="N.º de aviso o palabras (descripción, ubicación)…"
+              placeholder="N.º de aviso o palabras — busca en todas las semanas…"
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
-              aria-label="Buscar avisos en el programa por número o texto"
+              aria-label="Buscar avisos en el programa por número o texto en cualquier semana publicada"
             />
           </span>
         </label>
@@ -2826,10 +2895,10 @@ export function ProgramaClient() {
         <p className="text-sm text-muted-foreground">
           {esRolTecnico
             ? busqueda.trim()
-              ? "No hay órdenes abiertas de tu especialidad que coincidan con la búsqueda o los filtros. Probá otro término o semana."
+              ? "No hay órdenes abiertas de tu especialidad que coincidan con la búsqueda o los filtros. Probá otro término; la búsqueda revisa todas las semanas publicadas."
               : "No hay órdenes abiertas de tu especialidad en esta semana con los filtros seleccionados. Probá otra semana en el selector."
             : busqueda.trim()
-              ? "No hay avisos que coincidan con la búsqueda o los filtros seleccionados."
+              ? "No hay avisos que coincidan con la búsqueda o los filtros seleccionados (se buscó en todas las semanas publicadas)."
               : "No hay avisos con los filtros seleccionados."}
         </p>
       ) : null}

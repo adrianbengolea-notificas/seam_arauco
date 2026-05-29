@@ -27,6 +27,10 @@ import {
 } from "@/modules/scheduling/service";
 import { getWorkOrderById } from "@/modules/work-orders/repository";
 import {
+  searchAvisoEnProgramaSemanalAdmin,
+  type AvisoProgramaSearchHit,
+} from "@/modules/scheduling/search-aviso-programa-semanal-admin";
+import {
   searchWorkOrdersForWeeklyAgendaAdmin,
   type WorkOrderAgendaSearchRow,
 } from "@/modules/work-orders/search-weekly-agenda-admin";
@@ -503,6 +507,41 @@ export async function actionSearchWorkOrdersForAgenda(
       query: (data.query ?? "").trim(),
       viewerUid: session.uid,
       viewerRol: rol,
+    });
+  });
+}
+
+const searchAvisoProgramaSchema = z.object({
+  /** Si viene vacío u omitido: todos los centros permitidos para el usuario. */
+  centro: z.string().max(48).optional(),
+  query: z.string().max(120),
+});
+
+/** Busca un aviso en cualquier semana publicada del programa (grilla `programa_semanal`). */
+export async function actionSearchAvisoEnProgramaSemanal(
+  idToken: string,
+  input: z.infer<typeof searchAvisoProgramaSchema>,
+): Promise<ActionResult<AvisoProgramaSearchHit[]>> {
+  return wrap(async () => {
+    const session = await requireAnyPermisoFromToken(idToken, ["programa:ver", "programa:filtrar"]);
+    const data = searchAvisoProgramaSchema.parse(input);
+    const raw = (data.centro ?? "").trim();
+    const rol = toPermisoRol(session.rol);
+    const permitidos = centrosConsultaAgenda(session);
+    const centrosBuscar = raw
+      ? (() => {
+          if (rol !== "superadmin" && !usuarioTieneCentro(session, raw)) {
+            throw new AppError("FORBIDDEN", "Centro no permitido para tu usuario");
+          }
+          return [raw];
+        })()
+      : permitidos;
+    if (centrosBuscar.length === 0) {
+      throw new AppError("VALIDATION", "Tu usuario no tiene centros asignados para buscar avisos");
+    }
+    return searchAvisoEnProgramaSemanalAdmin({
+      centros: centrosBuscar,
+      query: data.query.trim(),
     });
   });
 }

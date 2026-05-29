@@ -25,6 +25,8 @@ import {
   closeWorkOrderWithPadSignatures,
   runWorkOrderPadCloseFollowUp,
   closeWorkOrderHistorico,
+  correctWorkOrderFechaFinEjecucion,
+  parseFechaEjecucionDiaLocal,
   createWorkOrderFromAviso,
   createWorkOrderFromForm,
   registerEvidenceAfterUpload,
@@ -535,15 +537,7 @@ export async function closeWorkOrder(
 }
 
 function parseFechaEjecucionHistorico(dateStr: string): Date {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr.trim());
-  if (!m) throw new AppError("VALIDATION", "Fecha de ejecución inválida (usá AAAA-MM-DD)");
-  const y = Number(m[1]);
-  const mo = Number(m[2]) - 1;
-  const d = Number(m[3]);
-  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) {
-    throw new AppError("VALIDATION", "Fecha de ejecución inválida");
-  }
-  return new Date(y, mo, d, 12, 0, 0, 0);
+  return parseFechaEjecucionDiaLocal(dateStr);
 }
 
 const closeHistoricoSchema = z.object({
@@ -553,6 +547,38 @@ const closeHistoricoSchema = z.object({
   evidenciaUrl: z.union([z.string().url(), z.literal("")]).optional(),
   tecnicoNombre: z.string().max(300).optional(),
 });
+
+const correctFechaRealizacionSchema = z.object({
+  workOrderId: z.string().min(1),
+  fechaEjecucion: z.string().min(1),
+  motivo: z.string().min(10).max(4000),
+});
+
+/** Solo rol superadmin: corregir fecha de realización en OT ya cerrada (certificación / empalmes cargados tarde). */
+export async function actionCorrectWorkOrderFechaRealizacion(
+  idToken: string,
+  input: z.infer<typeof correctFechaRealizacionSchema>,
+): Promise<ActionResult<void>> {
+  return wrap(async () => {
+    const session = await requireVerifiedProfileFromToken(idToken);
+    if (toPermisoRol(session.rol) !== "superadmin") {
+      throw new AppError(
+        "FORBIDDEN",
+        "Solo el súper administrador puede corregir la fecha de realización de una OT cerrada",
+      );
+    }
+    const parsed = correctFechaRealizacionSchema.parse(input);
+    const fechaEjecucion = parseFechaEjecucionDiaLocal(parsed.fechaEjecucion);
+    const displayName = (session.display_name?.trim() || session.email || session.uid).trim();
+    await correctWorkOrderFechaFinEjecucion({
+      workOrderId: parsed.workOrderId,
+      fechaEjecucion,
+      motivo: parsed.motivo,
+      actorUid: session.uid,
+      actorDisplayName: displayName,
+    });
+  });
+}
 
 /** Solo rol superadmin: registrar OT como completada con fecha real (empalme documentado). */
 export async function actionCloseWorkOrderHistorico(

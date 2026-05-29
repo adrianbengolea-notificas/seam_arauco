@@ -1206,32 +1206,16 @@ async function aplicarCierreAvisoTrasOtCerrada(input: {
   });
 }
 
-/** Efectos posteriores al cierre con pads (aviso, plan de mantenimiento, notificaciones). Idempotente si el aviso ya está cerrado. */
-export async function runWorkOrderPadCloseFollowUp(
-  workOrderId: string,
-  opts?: WorkOrderPadCloseFollowUpOptions,
+/** Actualiza aviso/plan vinculados con la fecha de ejecución (sin notificaciones). */
+async function syncAvisoYPlanFechaEjecucion(
+  wo: WorkOrder,
+  fechaEjecucion: Date | undefined,
+  avisoIdsAdicionalesCerrar?: string[],
 ): Promise<void> {
-  const wo = await getWorkOrderById(workOrderId);
-  if (!wo || wo.estado !== "CERRADA") return;
-
-  const fechaEjecucion = opts?.fechaEjecucionReferencia;
-  const esEmpalme = opts?.notificacion === "empalme_documentado";
   const aviso = await resolveAvisoVinculadoAWorkOrder(wo);
-
-  const esperabaAviso =
-    wo.provisorio_sin_aviso_sap !== true &&
-    Boolean(wo.aviso_id?.trim() || wo.aviso_numero?.trim());
-  if (esEmpalme && esperabaAviso && !aviso) {
-    throw new AppError(
-      "NOT_FOUND",
-      "No se encontró el aviso vinculado a esta orden; el empalme cerró la OT pero el aviso SAP quedó sin actualizar.",
-      { details: { workOrderId, aviso_id: wo.aviso_id, aviso_numero: wo.aviso_numero } },
-    );
-  }
-
   const avisosACerrar = new Map<string, Aviso>();
   if (aviso) avisosACerrar.set(aviso.id, aviso);
-  for (const id of opts?.avisoIdsAdicionalesCerrar ?? []) {
+  for (const id of avisoIdsAdicionalesCerrar ?? []) {
     const t = id.trim();
     if (!t || avisosACerrar.has(t)) continue;
     const extra = await getAvisoById(t);
@@ -1261,6 +1245,33 @@ export async function runWorkOrderPadCloseFollowUp(
       });
     }
   }
+}
+
+/** Efectos posteriores al cierre con pads (aviso, plan de mantenimiento, notificaciones). Idempotente si el aviso ya está cerrado. */
+export async function runWorkOrderPadCloseFollowUp(
+  workOrderId: string,
+  opts?: WorkOrderPadCloseFollowUpOptions,
+): Promise<void> {
+  const wo = await getWorkOrderById(workOrderId);
+  if (!wo || wo.estado !== "CERRADA") return;
+
+  const fechaEjecucion = opts?.fechaEjecucionReferencia;
+  const esEmpalme = opts?.notificacion === "empalme_documentado";
+  const aviso = await resolveAvisoVinculadoAWorkOrder(wo);
+
+  const esperabaAviso =
+    wo.provisorio_sin_aviso_sap !== true &&
+    Boolean(wo.aviso_id?.trim() || wo.aviso_numero?.trim());
+  if (esEmpalme && esperabaAviso && !aviso) {
+    throw new AppError(
+      "NOT_FOUND",
+      "No se encontró el aviso vinculado a esta orden; el empalme cerró la OT pero el aviso SAP quedó sin actualizar.",
+      { details: { workOrderId, aviso_id: wo.aviso_id, aviso_numero: wo.aviso_numero } },
+    );
+  }
+
+  await syncAvisoYPlanFechaEjecucion(wo, fechaEjecucion, opts?.avisoIdsAdicionalesCerrar);
+
   const dest = [
     ...(await destinatariosClienteArauco(wo.centro)),
     ...(await destinatariosSupervisoresAdmin(wo.centro)),
@@ -1277,6 +1288,102 @@ export async function runWorkOrderPadCloseFollowUp(
 
 function inicioDiaLocal(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function isoDateLocalFromDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function timestampToIsoDateLocal(ts: AdminTimestamp | null | undefined): string | null {
+  if (!ts) return null;
+  const d = typeof ts.toDate === "function" ? ts.toDate() : null;
+  if (!d || Number.isNaN(d.getTime())) return null;
+  return isoDateLocalFromDate(d);
+}
+
+/** Parsea AAAA-MM-DD como mediodía local (misma convención que cierre histórico). */
+export function parseFechaEjecucionDiaLocal(dateStr: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr.trim());
+  if (!m) throw new AppError("VALIDATION", "Fecha de ejecución inválida (usá AAAA-MM-DD)");
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) {
+    throw new AppError("VALIDATION", "Fecha de ejecución inválida");
+  }
+  return new Date(y, mo, d, 12, 0, 0, 0);
+}
+
+/**
+ * Corrige `fecha_fin_ejecucion` en OT ya cerrada. Solo invocar tras validar superadmin en la acción.
+ * Registra historial y realinea aviso/plan vinculados (sin reenviar notificaciones de cierre).
+ */
+export async function correctWorkOrderFechaFinEjecucion(input: {
+  workOrderId: string;
+  fechaEjecucion: Date;
+  motivo: string;
+  actorUid: string;
+  actorDisplayName: string;
+}): Promise<void> {
+  const motivo = input.motivo.trim();
+  if (motivo.length < 10) {
+    throw new AppError("VALIDATION", "El motivo debe tener al menos 10 caracteres");
+  }
+  const hoy = inicioDiaLocal(new Date());
+  const feNueva = inicioDiaLocal(input.fechaEjecucion);
+  if (feNueva.getTime() > hoy.getTime()) {
+    throw new AppError("VALIDATION", "La fecha de realización no puede ser futura");
+  }
+
+  const ref = adminWorkOrderRef(input.workOrderId);
+  let fechaAnteriorIso: string | null = null;
+
+  await getAdminDb().runTransaction(async (txn) => {
+    const snap = await txn.get(ref);
+    if (!snap.exists) {
+      throw new AppError("NOT_FOUND", "OT no encontrada", { details: { workOrderId: input.workOrderId } });
+    }
+    const wo = { id: snap.id, ...(snap.data() as Omit<WorkOrder, "id">) };
+    if (wo.archivada === true) {
+      throw new AppError("NOT_FOUND", "OT no encontrada", { details: { workOrderId: input.workOrderId } });
+    }
+    if (wo.estado === "ANULADA") {
+      throw new AppError("CONFLICT", "La OT está anulada");
+    }
+    if (wo.estado !== "CERRADA") {
+      throw new AppError("CONFLICT", "Solo se puede corregir la fecha en órdenes ya cerradas");
+    }
+
+    fechaAnteriorIso = timestampToIsoDateLocal(wo.fecha_fin_ejecucion ?? null);
+    const fechaNuevaIso = isoDateLocalFromDate(feNueva);
+    if (fechaAnteriorIso === fechaNuevaIso) {
+      throw new AppError("CONFLICT", "La fecha indicada coincide con la fecha de realización actual");
+    }
+
+    txn.update(ref, {
+      fecha_fin_ejecucion: AdminTimestamp.fromDate(input.fechaEjecucion),
+      updated_at: FieldValue.serverTimestamp(),
+    });
+  });
+
+  await appendHistorialAdmin(input.workOrderId, {
+    tipo: "FECHA_REALIZACION_CORREGIDA",
+    actor_uid: input.actorUid,
+    payload: {
+      fechaAnterior: fechaAnteriorIso ?? undefined,
+      fechaNueva: isoDateLocalFromDate(feNueva),
+      motivo,
+      actorDisplayName: input.actorDisplayName.trim(),
+    },
+  });
+
+  const woAfter = await getWorkOrderById(input.workOrderId);
+  if (woAfter?.estado === "CERRADA") {
+    await syncAvisoYPlanFechaEjecucion(woAfter, input.fechaEjecucion);
+  }
 }
 
 /** Cierre histórico (empalme): trabajo ya ejecutado fuera del CMMS; solo superadmin. */

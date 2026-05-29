@@ -278,7 +278,8 @@ export type HistorialEventoTipo =
   | "PLANILLA_FIRMADA"
   | "COMENTARIO"
   | "MATERIAL_NORMALIZADO_IA"
-  | "ARCHIVADA";
+  | "ARCHIVADA"
+  | "FECHA_REALIZACION_CORREGIDA";
 
 export type WorkOrderHistorialEvent = {
   id: string;

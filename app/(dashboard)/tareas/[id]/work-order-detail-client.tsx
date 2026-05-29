@@ -5,6 +5,7 @@ import {
   actionArchiveWorkOrder,
   actionAssignTechnician,
   actionCloseWorkOrderHistorico,
+  actionCorrectWorkOrderFechaRealizacion,
   addMaterialToOT,
   updateChecklistItem,
   updateWorkOrderStatus,
@@ -173,6 +174,11 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
   const [empEvidencia, setEmpEvidencia] = useState("");
   const [empBusy, setEmpBusy] = useState(false);
 
+  const [corrFechaOpen, setCorrFechaOpen] = useState(false);
+  const [corrFecha, setCorrFecha] = useState(() => isoDateLocal(new Date()));
+  const [corrMotivo, setCorrMotivo] = useState("");
+  const [corrBusy, setCorrBusy] = useState(false);
+
   const [archiveBusy, setArchiveBusy] = useState(false);
 
   const [planillaOpen, setPlanillaOpen] = useState(false);
@@ -302,6 +308,47 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
     setEmpTecnico("");
     setEmpEvidencia("");
     setEmpOpen(true);
+  }
+
+  function fechaFinEjecucionIso(wo: NonNullable<typeof workOrder>): string {
+    const fp = wo.fecha_fin_ejecucion;
+    if (fp != null && typeof (fp as { toDate?: () => Date }).toDate === "function") {
+      const d = (fp as { toDate: () => Date }).toDate();
+      if (!Number.isNaN(d.getTime())) return isoDateLocal(d);
+    }
+    return isoDateLocal(new Date());
+  }
+
+  function openCorregirFechaModal() {
+    if (!workOrder) return;
+    setCorrFecha(fechaFinEjecucionIso(workOrder));
+    setCorrMotivo("");
+    setCorrFechaOpen(true);
+  }
+
+  async function submitCorregirFecha(e: React.FormEvent) {
+    e.preventDefault();
+    setCorrBusy(true);
+    setMsg(null);
+    try {
+      const t = await token();
+      const res = await actionCorrectWorkOrderFechaRealizacion(t, {
+        workOrderId,
+        fechaEjecucion: corrFecha,
+        motivo: corrMotivo,
+      });
+      if (!res.ok) {
+        setMsg(res.error.message);
+        return;
+      }
+      setCorrFechaOpen(false);
+      router.refresh();
+      setMsg("Fecha de realización actualizada. El cambio quedó registrado en el historial de movimientos.");
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Error al corregir la fecha");
+    } finally {
+      setCorrBusy(false);
+    }
   }
 
   async function submitEmpalme(e: React.FormEvent) {
@@ -555,6 +602,7 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
     (workOrder.estado === "BORRADOR" ||
       workOrder.estado === "ABIERTA" ||
       workOrder.estado === "EN_EJECUCION");
+  const puedeCorregirFechaRealizacion = esSuperadmin && cerrada && workOrder.estado === "CERRADA";
   const subtipoWo = workOrderSubtipo(workOrder);
   const tituloOt = workOrder.texto_trabajo?.trim() || "Sin descripción";
   const numeroOrden = workOrderNumeroOperativo(workOrder);
@@ -684,6 +732,11 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
             {puedeRegistrarEmpalme ? (
               <Button type="button" variant="outline" size="sm" onClick={openEmpalmeModal}>
                 Registrar como completada (empalme)
+              </Button>
+            ) : null}
+            {puedeCorregirFechaRealizacion ? (
+              <Button type="button" variant="outline" size="sm" onClick={openCorregirFechaModal}>
+                Corregir fecha de realización
               </Button>
             ) : null}
             {puedeArchivarOt ? (
@@ -855,6 +908,21 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
               </p>
             ) : null}
           </div>
+
+          {workOrder.fecha_fin_ejecucion ? (
+            <div>
+              <p className="text-xs font-medium text-zinc-500">Fecha de realización</p>
+              <p className="font-medium text-foreground">
+                {formatFirestoreDate(workOrder.fecha_fin_ejecucion, "dd/MM/yyyy")}
+              </p>
+              {puedeCorregirFechaRealizacion ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Si la orden se cargó con fecha incorrecta (p. ej. mayo en lugar de abril), podés corregirla con el
+                  botón de arriba; el cambio queda en el historial.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
           <div>
             <p className="text-xs font-medium text-zinc-500">Técnico asignado</p>
@@ -1196,6 +1264,73 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
       <Button variant="outline" asChild>
         <Link href="/tareas">Volver a OTs</Link>
       </Button>
+
+      {corrFechaOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="corr-fecha-dialog-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !corrBusy) setCorrFechaOpen(false);
+          }}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="corr-fecha-dialog-title" className="text-lg font-semibold text-foreground">
+              Corregir fecha de realización
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Solo para órdenes ya cerradas. Actualiza la fecha que usa el sistema para certificación y reportes; el
+              cambio queda registrado en el historial de movimientos.
+            </p>
+            <form className="mt-4 space-y-4" onSubmit={(e) => void submitCorregirFecha(e)}>
+              <div className="space-y-1.5">
+                <label htmlFor="corr-fecha" className="text-sm font-medium text-foreground">
+                  Nueva fecha de realización
+                </label>
+                <Input
+                  id="corr-fecha"
+                  type="date"
+                  required
+                  max={isoDateLocal(new Date())}
+                  value={corrFecha}
+                  onChange={(e) => setCorrFecha(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="corr-motivo" className="text-sm font-medium text-foreground">
+                  Motivo del cambio (mín. 10 caracteres)
+                </label>
+                <Textarea
+                  id="corr-motivo"
+                  required
+                  minLength={10}
+                  value={corrMotivo}
+                  onChange={(e) => setCorrMotivo(e.target.value)}
+                  placeholder="Ej.: Trabajo ejecutado en abril; se cargó en mayo para certificación del mes correcto."
+                  rows={4}
+                />
+              </div>
+              <div className="flex flex-wrap gap-2 pt-2">
+                <Button type="submit" disabled={corrBusy}>
+                  {corrBusy ? "Guardando…" : "Guardar corrección"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={corrBusy}
+                  onClick={() => setCorrFechaOpen(false)}
+                >
+                  Cancelar
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
 
       {empOpen ? (
         <div

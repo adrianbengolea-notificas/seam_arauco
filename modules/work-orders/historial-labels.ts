@@ -85,6 +85,7 @@ const TITLES: Record<HistorialEventoTipo, string> = {
   COMENTARIO: "Comentario",
   MATERIAL_NORMALIZADO_IA: "Material (normalización interna)",
   ARCHIVADA: "OT archivada",
+  FECHA_REALIZACION_CORREGIDA: "Fecha de realización corregida",
 };
 
 export function historialEventoTitulo(tipo: HistorialEventoTipo): string {
@@ -125,6 +126,12 @@ export function historialEventoResumen(ev: WorkOrderHistorialEvent): string {
       return String(p.lineId ?? "");
     case "ARCHIVADA":
       return "oculta en listados";
+    case "FECHA_REALIZACION_CORREGIDA": {
+      const desde = str(p.fechaAnterior);
+      const hacia = str(p.fechaNueva);
+      if (desde && hacia) return `${desde} → ${hacia}`;
+      return str(p.fechaNueva) || "";
+    }
     default:
       return "";
   }
@@ -192,6 +199,15 @@ export function historialEventoTextoUsuario(
       return "Material vinculado al catálogo (normalización automática)";
     case "ARCHIVADA":
       return conActor("Orden archivada y oculta para el trabajo operativo diario", nombre);
+    case "FECHA_REALIZACION_CORREGIDA": {
+      const desde = str(p.fechaAnterior);
+      const hacia = str(p.fechaNueva);
+      const tramo =
+        desde && hacia ? `${desde} → ${hacia}` : hacia ? hacia : "fecha actualizada";
+      const motivo = str(p.motivo);
+      const base = conActor(`Fecha de realización corregida: ${tramo}`, nombre);
+      return motivo ? `${base}. Motivo: ${motivo}` : base;
+    }
     default:
       return historialEventoTitulo(ev.tipo);
   }

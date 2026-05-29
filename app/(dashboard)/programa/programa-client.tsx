@@ -5,7 +5,10 @@ import {
   actionRemoveAvisoFromProgramaPublicado,
   actionSearchAvisoEnProgramaSemanal,
 } from "@/app/actions/schedule";
-import { actionArchiveWorkOrder } from "@/app/actions/work-orders";
+import {
+  actionArchiveWorkOrder,
+  actionCorrectWorkOrderFechaRealizacion,
+} from "@/app/actions/work-orders";
 import { ProgramaSeccionNav } from "@/app/(dashboard)/programa/programa-seccion-nav";
 import { ProgramaSemanalClient } from "@/app/programa-semanal/programa-semanal-client";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { HelpIconTooltip } from "@/components/ui/help-icon-tooltip";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   CENTRO_SELECTOR_TODAS_PLANTAS,
   DEFAULT_CENTRO,
@@ -22,6 +26,7 @@ import {
   PROGRAMA_AGENDA_OT_SEMANAL_HABILITADA,
 } from "@/lib/config/app-config";
 import { mensajeErrorFirebaseParaUsuario } from "@/lib/firebase/mensaje-error-usuario";
+import { formatFirestoreDate } from "@/lib/pdf/format-firestore-date";
 import { HORAS_ALERTA_PROPUESTA_SIN_VISTA } from "@/lib/config/limits";
 import { isSuperAdminRole } from "@/modules/users/roles";
 import { usuarioTieneCentro } from "@/modules/users/centros-usuario";
@@ -43,6 +48,7 @@ import {
   type MergedSemanaOpcion,
   type SemanaOpcion,
 } from "@/modules/scheduling/hooks";
+import { useWorkOrderLive } from "@/modules/work-orders/hooks";
 import { useWorkOrderEstadosForIds } from "@/modules/work-orders/use-work-order-estados-for-ids";
 import type { WorkOrderEstado } from "@/modules/work-orders/types";
 import { propuestaSemanaDocId } from "@/lib/scheduling/propuesta-id";
@@ -929,6 +935,22 @@ function SelectorVistaPrograma({
   );
 }
 
+function isoDateLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function fechaFinEjecucionIsoDesdeWo(wo: { fecha_fin_ejecucion?: { toDate?: () => Date } | null }): string {
+  const fp = wo.fecha_fin_ejecucion;
+  if (fp != null && typeof fp.toDate === "function") {
+    const d = fp.toDate();
+    if (!Number.isNaN(d.getTime())) return isoDateLocal(d);
+  }
+  return isoDateLocal(new Date());
+}
+
 function SelectorPlantaSuperadmin({
   value,
   onChange,
@@ -992,6 +1014,10 @@ function AvisoDrawer({
   const [archiveMsg, setArchiveMsg] = useState<{ tipo: "ok" | "err"; texto: string } | null>(null);
   const [quitarBusy, setQuitarBusy] = useState(false);
   const [quitarMsg, setQuitarMsg] = useState<{ tipo: "ok" | "err"; texto: string } | null>(null);
+  const [corrFecha, setCorrFecha] = useState(() => isoDateLocal(new Date()));
+  const [corrMotivo, setCorrMotivo] = useState("");
+  const [corrBusy, setCorrBusy] = useState(false);
+  const [corrMsg, setCorrMsg] = useState<{ tipo: "ok" | "err"; texto: string } | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1008,6 +1034,9 @@ function AvisoDrawer({
     setMoverBusy(false);
     setQuitarMsg(null);
     setQuitarBusy(false);
+    setCorrMsg(null);
+    setCorrMotivo("");
+    setCorrBusy(false);
   }, [estado, programaDocSeleccionActual]);
 
   const avisoDocId = estado.aviso.avisoFirestoreId?.trim() || undefined;
@@ -1017,6 +1046,14 @@ function AvisoDrawer({
   /** Misma entidad que la OT del CTA: si ya existe, no ofrecer alta duplicada. */
   const ordenServicioExistenteId =
     avisoFb?.work_order_id?.trim() || aviso.workOrderId?.trim() || undefined;
+  const { workOrder: woVinculada, loading: woVinculadaLoading } = useWorkOrderLive(ordenServicioExistenteId);
+  const puedeCorregirFechaRealizacion =
+    esSuperadmin && woVinculada?.estado === "CERRADA" && Boolean(ordenServicioExistenteId?.trim());
+
+  useEffect(() => {
+    if (woVinculada) setCorrFecha(fechaFinEjecucionIsoDesdeWo(woVinculada));
+  }, [woVinculada?.id, woVinculada?.fecha_fin_ejecucion]);
+
   const antecesor = avisoFb?.antecesor_orden_abierta;
 
   async function onSubmitReprogramar(e: FormEvent) {
@@ -1101,6 +1138,41 @@ function AvisoDrawer({
       });
     } finally {
       setQuitarBusy(false);
+    }
+  }
+
+  async function onSubmitCorregirFechaRealizacion(e: FormEvent) {
+    e.preventDefault();
+    if (!ordenServicioExistenteId?.trim()) return;
+    setCorrMsg(null);
+    setCorrBusy(true);
+    try {
+      const tok = await getClientIdToken();
+      if (!tok) {
+        setCorrMsg({ tipo: "err", texto: "No hay sesión. Volvé a iniciar sesión." });
+        return;
+      }
+      const res = await actionCorrectWorkOrderFechaRealizacion(tok, {
+        workOrderId: ordenServicioExistenteId.trim(),
+        fechaEjecucion: corrFecha,
+        motivo: corrMotivo,
+      });
+      if (!res.ok) {
+        setCorrMsg({ tipo: "err", texto: res.error.message });
+        return;
+      }
+      setCorrMsg({
+        tipo: "ok",
+        texto: "Fecha de realización actualizada. El cambio quedó en el historial de la OT.",
+      });
+      setCorrMotivo("");
+    } catch (err) {
+      setCorrMsg({
+        tipo: "err",
+        texto: err instanceof Error ? err.message : "No se pudo corregir la fecha",
+      });
+    } finally {
+      setCorrBusy(false);
     }
   }
 
@@ -1308,6 +1380,71 @@ function AvisoDrawer({
             </Button>
           </div>
         ) : null}
+        {puedeCorregirFechaRealizacion ? (
+          <form
+            className="space-y-3 border-t border-border px-4 py-4"
+            onSubmit={onSubmitCorregirFechaRealizacion}
+          >
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Corregir fecha de realización
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                Solo súper administrador. La OT está <strong className="text-foreground">cerrada</strong>: podés
+                ajustar la fecha con la que figura en certificación y reportes (p. ej. abril en lugar de mayo). Queda
+                registrado en el historial de movimientos de la OT.
+              </p>
+              {woVinculada?.fecha_fin_ejecucion ? (
+                <p className="mt-2 text-sm text-foreground">
+                  Fecha actual en sistema:{" "}
+                  <span className="font-semibold">
+                    {formatFirestoreDate(woVinculada.fecha_fin_ejecucion, "dd/MM/yyyy")}
+                  </span>
+                </p>
+              ) : null}
+            </div>
+            <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
+              Nueva fecha de realización
+              <Input
+                type="date"
+                required
+                max={isoDateLocal(new Date())}
+                value={corrFecha}
+                onChange={(e) => setCorrFecha(e.target.value)}
+                disabled={corrBusy}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
+              Motivo del cambio (mín. 10 caracteres)
+              <Textarea
+                required
+                minLength={10}
+                rows={3}
+                value={corrMotivo}
+                onChange={(e) => setCorrMotivo(e.target.value)}
+                disabled={corrBusy}
+                placeholder="Ej.: Trabajo hecho en abril; se cargó en mayo para certificación."
+              />
+            </label>
+            {corrMsg?.tipo === "err" ? (
+              <p className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+                {corrMsg.texto}
+              </p>
+            ) : null}
+            {corrMsg?.tipo === "ok" ? (
+              <p className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1.5 text-xs text-emerald-900 dark:text-emerald-100">
+                {corrMsg.texto}
+              </p>
+            ) : null}
+            <Button type="submit" variant="outline" className="w-full" disabled={corrBusy}>
+              {corrBusy ? "Guardando…" : "Guardar fecha de realización"}
+            </Button>
+          </form>
+        ) : esSuperadmin && ordenServicioExistenteId && woVinculadaLoading ? (
+          <p className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+            Comprobando estado de la orden…
+          </p>
+        ) : null}
         {puedeCrearOt && esSuperadmin && ordenServicioExistenteId ? (
           <div className="space-y-2 border-t border-border px-4 py-4">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Archivo</p>
@@ -1346,6 +1483,13 @@ function AvisoDrawer({
                 </Button>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Este aviso ya tiene una OT en el sistema.
+                  {puedeCorregirFechaRealizacion
+                    ? " Para corregir la fecha de realización, usá el formulario de arriba en este panel."
+                    : woVinculada?.estado === "CERRADA" && !esSuperadmin
+                      ? ""
+                      : esSuperadmin && woVinculada?.estado !== "CERRADA" && woVinculada
+                        ? " La corrección de fecha de realización solo aplica cuando la OT está cerrada."
+                        : ""}
                 </p>
               </>
             ) : avisoDocId && avisoFbLoading ? (

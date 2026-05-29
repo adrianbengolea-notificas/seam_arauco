@@ -97,8 +97,9 @@ export async function iniciarPlanillaService(input: {
     return { respuestaId: abierta.id, existing: true, templateId: abierta.templateId };
   }
 
+  const assetIdTrim = wo.asset_id?.trim() ?? "";
   const [asset, aviso] = await Promise.all([
-    getAssetById(wo.asset_id),
+    assetIdTrim ? getAssetById(assetIdTrim) : Promise.resolve(null),
     wo.aviso_id?.trim() ? getAvisoById(wo.aviso_id.trim()) : Promise.resolve(null),
   ]);
   const templateId = selectTemplate(wo, {

@@ -105,7 +105,9 @@ export async function adminUpdateAsset(assetId: string, input: AdminUpdateAssetI
 }
 
 export async function getAssetById(assetId: string): Promise<Asset | null> {
-  const snap = await getAdminDb().collection(ASSETS_COLLECTION).doc(assetId).get();
+  const id = assetId?.trim();
+  if (!id) return null;
+  const snap = await getAdminDb().collection(ASSETS_COLLECTION).doc(id).get();
   if (!snap.exists) return null;
   const data = snap.data() as Omit<Asset, "id">;
   return { id: snap.id, ...data };

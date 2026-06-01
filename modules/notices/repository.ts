@@ -1,6 +1,6 @@
 import { getAdminDb } from "@/firebase/firebaseAdmin";
 import { AVISOS_COLLECTION } from "@/lib/firestore/collections";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, type UpdateData } from "firebase-admin/firestore";
 import type { Aviso } from "@/modules/notices/types";
 
 export { AVISOS_COLLECTION };
@@ -13,7 +13,7 @@ export async function getAvisoById(avisoId: string): Promise<Aviso | null> {
 
 export async function updateAviso(
   avisoId: string,
-  patch: Partial<Omit<Aviso, "id" | "created_at">>,
+  patch: UpdateData<Omit<Aviso, "id">>,
 ): Promise<void> {
   await getAdminDb()
     .collection(AVISOS_COLLECTION)

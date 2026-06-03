@@ -1067,7 +1067,11 @@ function AvisoDrawer({
   const { aviso, slot } = estado;
   /** Misma entidad que la OT del CTA: si ya existe, no ofrecer alta duplicada. */
   const ordenServicioExistenteId =
-    avisoFb?.work_order_id?.trim() || aviso.workOrderId?.trim() || undefined;
+    avisoFb?.work_order_id?.trim() ||
+    aviso.workOrderId?.trim() ||
+    avisoFb?.ultima_ejecucion_ot_id?.trim() ||
+    undefined;
+  const avisoCerradoSinOtVisible = avisoFb?.estado === "CERRADO" && !ordenServicioExistenteId;
   const { workOrder: woVinculada, loading: woVinculadaLoading } = useWorkOrderLive(ordenServicioExistenteId);
   const puedeCorregirFechaRealizacion =
     esSuperadmin && woVinculada?.estado === "CERRADA" && Boolean(ordenServicioExistenteId?.trim());
@@ -1533,6 +1537,14 @@ function AvisoDrawer({
               <Button className="w-full" type="button" disabled>
                 Comprobando si ya hay orden…
               </Button>
+            ) : avisoCerradoSinOtVisible ? (
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Este aviso ya está cerrado. Para ajustar la fecha de realización, abrí la OT desde{" "}
+                <Link href="/tareas" className="font-semibold underline underline-offset-2">
+                  Tareas
+                </Link>
+                .
+              </p>
             ) : (
               <Button className="w-full" asChild>
                 <Link href={`/tareas/nueva?avisoId=${encodeURIComponent(aviso.numero)}`}>

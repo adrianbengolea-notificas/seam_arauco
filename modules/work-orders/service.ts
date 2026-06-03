@@ -86,6 +86,17 @@ function avisoRef(avisoId: string) {
   return getAdminDb().collection(COLLECTIONS.avisos).doc(avisoId);
 }
 
+/** Impide duplicar OT sobre avisos ya cerrados con ejecución registrada. */
+function assertAvisoPuedeRecibirNuevaOt(aviso: Pick<Aviso, "estado" | "ultima_ejecucion_ot_id">): void {
+  if (aviso.estado === "CERRADO" && aviso.ultima_ejecucion_ot_id?.trim()) {
+    throw new AppError(
+      "CONFLICT",
+      "El aviso ya está cerrado con una orden ejecutada. Abrí esa OT para corregir la fecha; no se puede generar otra.",
+      { details: { ultima_ejecucion_ot_id: aviso.ultima_ejecucion_ot_id.trim() } },
+    );
+  }
+}
+
 /** Disciplinas que pueden no tener equipo en `assets` (id vacío o inexistente). Incluye HG (misma lógica operativa que el eléctrico en programación). */
 function disciplinaAceptaActivoOpcional(especialidad: string | undefined): boolean {
   const n = (especialidad ?? "")
@@ -146,6 +157,7 @@ export async function createWorkOrderFromAviso(input: {
       details: { work_order_id: aviso.work_order_id },
     });
   }
+  assertAvisoPuedeRecibirNuevaOt(aviso);
 
   const ant = aviso.antecesor_orden_abierta;
   if (ant?.work_order_id?.trim()) {
@@ -167,6 +179,7 @@ export async function createWorkOrderFromAviso(input: {
         details: { work_order_id: avisoFresh.work_order_id },
       });
     }
+    assertAvisoPuedeRecibirNuevaOt(avisoFresh);
     const antF = avisoFresh.antecesor_orden_abierta;
     if (antF?.work_order_id?.trim()) {
       throw new AppError("CONFLICT", mensajeAntecesorOrdenPendiente(antF), { details: antF });
@@ -705,6 +718,7 @@ export async function createWorkOrderFromForm(input: {
         details: { work_order_id: aviso.work_order_id },
       });
     }
+    assertAvisoPuedeRecibirNuevaOt(aviso);
   }
 
   let fechaInicioEfectivaForm = input.fecha_inicio_programada;
@@ -753,6 +767,7 @@ export async function createWorkOrderFromForm(input: {
           details: { work_order_id: avisoFresh.work_order_id },
         });
       }
+      assertAvisoPuedeRecibirNuevaOt(avisoFresh);
     }
 
     const aviso_numero_raw = avisoFresh?.n_aviso ?? input.aviso_numero;
@@ -1211,6 +1226,103 @@ async function aplicarCierreAvisoTrasOtCerrada(input: {
   });
 }
 
+/** Solo fechas de ejecución/vencimiento; no desvincula la OT ni re-cierra el aviso. */
+async function actualizarFechasEjecucionAvisoSinReabrir(input: {
+  aviso: Aviso;
+  wo: WorkOrder;
+  fechaEjecucion: Date;
+}): Promise<void> {
+  const mtsa = inferMtsaDesdeAviso(input.aviso);
+  const proximo = proximoVencimientoDesdeFecha(input.fechaEjecucion, mtsa);
+  const hoy = new Date();
+  const dias = diasParaVencimientoDesdeProximo(proximo, hoy);
+  await updateAviso(input.aviso.id, {
+    ultima_ejecucion_ot_id: input.wo.id,
+    ultima_ejecucion_fecha: AdminTimestamp.fromDate(
+      input.fechaEjecucion,
+    ) as unknown as Aviso["ultima_ejecucion_fecha"],
+    proximo_vencimiento: AdminTimestamp.fromDate(proximo) as unknown as Aviso["proximo_vencimiento"],
+    dias_para_vencimiento: dias,
+    estado_vencimiento: estadoVencimientoDesdeDias(dias),
+  });
+}
+
+async function syncPlanFechasTrasEjecucion(
+  wo: WorkOrder,
+  aviso: Aviso | null,
+  fechaEjecucion: Date,
+): Promise<void> {
+  const avisoKey = aviso?.id ?? wo.aviso_id?.trim() ?? "";
+  const planKey = (wo.plan_id?.trim() || avisoKey).trim();
+  if (!planKey) return;
+
+  const plan = await getPlanMantenimientoAdmin(planKey);
+  if (!plan) return;
+
+  const ciclo =
+    typeof plan.dias_ciclo === "number" && plan.dias_ciclo > 0
+      ? plan.dias_ciclo
+      : aviso
+        ? diasPorMtsa(inferMtsaDesdeAviso(aviso))
+        : 30;
+  await updatePlanMantenimientoAfterClose({
+    planId: plan.id,
+    otId: wo.id,
+    diasCiclo: ciclo,
+    fechaUltimaEjecucion: fechaEjecucion,
+  });
+}
+
+/** Corrige fechas en aviso/plan vinculados sin efectos de cierre (p. ej. borrar work_order_id). */
+async function syncAvisoYPlanFechasCorreccionLigera(wo: WorkOrder, fechaEjecucion: Date): Promise<void> {
+  const aviso = await resolveAvisoVinculadoAWorkOrder(wo);
+  if (aviso) {
+    await actualizarFechasEjecucionAvisoSinReabrir({ aviso, wo, fechaEjecucion });
+  }
+  await syncPlanFechasTrasEjecucion(wo, aviso, fechaEjecucion);
+}
+
+/**
+ * Avisos SAP vinculados a cerrar junto con la OT: número nuevo (`alerta_cerrar_para_aviso_sap`)
+ * o avisos que apuntaban a esta orden como antecesora.
+ */
+export async function collectAvisoIdsSapVinculadosAlCerrarOrden(workOrderId: string): Promise<string[]> {
+  const wo = await getWorkOrderById(workOrderId);
+  if (!wo) return [];
+
+  const ids = new Set<string>();
+  const alertaId = wo.alerta_cerrar_para_aviso_sap?.aviso_id?.trim();
+  if (alertaId) ids.add(alertaId);
+
+  const snap = await getAdminDb()
+    .collection(COLLECTIONS.avisos)
+    .where("antecesor_orden_abierta.work_order_id", "==", workOrderId)
+    .limit(80)
+    .get();
+  for (const d of snap.docs) ids.add(d.id);
+
+  return [...ids];
+}
+
+/** Cierra avisos SAP duplicados que esperaban esta OT (no incluye el aviso principal). */
+async function syncCierreAvisosSapAdicionales(
+  wo: WorkOrder,
+  fechaEjecucion: Date,
+  avisoIdsAdicionalesCerrar: string[],
+): Promise<void> {
+  const avisoPrincipal = await resolveAvisoVinculadoAWorkOrder(wo);
+  const principalId = avisoPrincipal?.id?.trim() ?? "";
+
+  for (const id of avisoIdsAdicionalesCerrar) {
+    const t = id.trim();
+    if (!t || t === principalId) continue;
+    const extra = await getAvisoById(t);
+    if (extra && extra.estado !== "ANULADO") {
+      await aplicarCierreAvisoTrasOtCerrada({ aviso: extra, wo, fechaEjecucion });
+    }
+  }
+}
+
 /** Actualiza aviso/plan vinculados con la fecha de ejecución (sin notificaciones). */
 async function syncAvisoYPlanFechaEjecucion(
   wo: WorkOrder,
@@ -1275,6 +1387,11 @@ export async function runWorkOrderPadCloseFollowUp(
     );
   }
 
+  const avisosAdicionales = new Set<string>([
+    ...(opts?.avisoIdsAdicionalesCerrar ?? []),
+    ...(await collectAvisoIdsSapVinculadosAlCerrarOrden(workOrderId)),
+  ]);
+
   const avisoAntesSync = await resolveAvisoVinculadoAWorkOrder(wo);
   if (avisoAntesSync?.id) {
     let fechaAntecesor = opts?.fechaEjecucionReferencia;
@@ -1285,7 +1402,7 @@ export async function runWorkOrderPadCloseFollowUp(
         if (!Number.isNaN(d.getTime())) fechaAntecesor = d;
       }
     }
-    await registrarAntecesorSupersedidoAlCerrarOrdenSucesora({
+    const antAvisoId = await registrarAntecesorSupersedidoAlCerrarOrdenSucesora({
       ordenCerradaId: wo.id,
       ordenCerradaNOt: wo.n_ot,
       avisoId: avisoAntesSync.id,
@@ -1293,9 +1410,10 @@ export async function runWorkOrderPadCloseFollowUp(
       fechaEjecucion: fechaAntecesor,
       actorUid: wo.cerrada_por_uid,
     });
+    if (antAvisoId) avisosAdicionales.add(antAvisoId);
   }
 
-  await syncAvisoYPlanFechaEjecucion(wo, fechaEjecucion, opts?.avisoIdsAdicionalesCerrar);
+  await syncAvisoYPlanFechaEjecucion(wo, fechaEjecucion, [...avisosAdicionales]);
 
   const dest = [
     ...(await destinatariosClienteArauco(wo.centro)),
@@ -1432,8 +1550,13 @@ export async function correctWorkOrderFechaFinEjecucion(input: {
       .limit(80)
       .get();
     for (const d of snapAntecesor.docs) avisoIdsAdicionalesCerrar.add(d.id);
-    await syncAvisoYPlanFechaEjecucion(woAfter, input.fechaEjecucion, [...avisoIdsAdicionalesCerrar]);
-    await limpiarAntecesorAlCerrarOrden(input.workOrderId);
+
+    await syncAvisoYPlanFechasCorreccionLigera(woAfter, input.fechaEjecucion);
+
+    if (avisoIdsAdicionalesCerrar.size > 0) {
+      await syncCierreAvisosSapAdicionales(woAfter, input.fechaEjecucion, [...avisoIdsAdicionalesCerrar]);
+      await limpiarAntecesorAlCerrarOrden(input.workOrderId);
+    }
   }
 }
 
@@ -1510,23 +1633,10 @@ export async function closeWorkOrderHistorico(input: {
     payload: historialPayload,
   });
 
-  const woPre = await getWorkOrderById(input.workOrderId);
-  const avisoIdsAdicionalesCerrar = new Set<string>();
-  if (woPre?.alerta_cerrar_para_aviso_sap?.aviso_id?.trim()) {
-    avisoIdsAdicionalesCerrar.add(woPre.alerta_cerrar_para_aviso_sap.aviso_id.trim());
-  }
-  const snapAntecesor = await getAdminDb()
-    .collection(COLLECTIONS.avisos)
-    .where("antecesor_orden_abierta.work_order_id", "==", input.workOrderId)
-    .limit(80)
-    .get();
-  for (const d of snapAntecesor.docs) avisoIdsAdicionalesCerrar.add(d.id);
-
   await limpiarAntecesorAlCerrarOrden(input.workOrderId);
   await runWorkOrderPadCloseFollowUp(input.workOrderId, {
     fechaEjecucionReferencia: input.fechaEjecucion,
     notificacion: "empalme_documentado",
-    avisoIdsAdicionalesCerrar: [...avisoIdsAdicionalesCerrar],
   });
 }
 

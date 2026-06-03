@@ -241,17 +241,17 @@ async function cerrarOrdenAntecesoraSupersedida(input: {
   ordenSucesoraNAviso?: string;
   fechaEjecucion?: Date;
   actorUid?: string;
-}): Promise<void> {
+}): Promise<string | undefined> {
   const antWoId = input.antecesorWorkOrderId.trim();
-  if (!antWoId) return;
+  if (!antWoId) return undefined;
 
   const db = getAdminDb();
   const ref = db.collection(COLLECTIONS.work_orders).doc(antWoId);
   const snap = await ref.get();
-  if (!snap.exists) return;
+  if (!snap.exists) return undefined;
 
   const wo = { id: snap.id, ...(snap.data() as Omit<WorkOrder, "id">) } as WorkOrder;
-  if (wo.archivada === true) return;
+  if (wo.archivada === true) return undefined;
 
   const reemplazada = {
     work_order_id: input.ordenSucesoraId.trim(),
@@ -314,7 +314,6 @@ async function cerrarOrdenAntecesoraSupersedida(input: {
         .set(
           {
             work_order_id: FieldValue.delete(),
-            estado: "ABIERTO",
             updated_at: FieldValue.serverTimestamp(),
           } as Record<string, unknown>,
           { merge: true },
@@ -323,6 +322,7 @@ async function cerrarOrdenAntecesoraSupersedida(input: {
   }
 
   await limpiarAntecesorAlCerrarOrden(antWoId);
+  return aid || undefined;
 }
 
 /**
@@ -336,17 +336,18 @@ export async function registrarAntecesorSupersedidoAlCerrarOrdenSucesora(input: 
   ordenCerradaNAviso?: string;
   fechaEjecucion?: Date;
   actorUid?: string;
-}): Promise<void> {
+}): Promise<string | undefined> {
   const avisoId = input.avisoId.trim();
   const ordenCerradaId = input.ordenCerradaId.trim();
-  if (!avisoId || !ordenCerradaId) return;
+  if (!avisoId || !ordenCerradaId) return undefined;
 
   const aviso = await getAvisoById(avisoId);
-  if (!aviso) return;
+  if (!aviso) return undefined;
 
   const antWoId = aviso.antecesor_orden_abierta?.work_order_id?.trim();
+  let antAvisoId: string | undefined;
   if (antWoId) {
-    await cerrarOrdenAntecesoraSupersedida({
+    antAvisoId = await cerrarOrdenAntecesoraSupersedida({
       antecesorWorkOrderId: antWoId,
       ordenSucesoraId: ordenCerradaId,
       ordenSucesoraNOt: input.ordenCerradaNOt,
@@ -362,6 +363,8 @@ export async function registrarAntecesorSupersedidoAlCerrarOrdenSucesora(input: 
     centro: aviso.centro ?? "",
     incluido_en_semana: aviso.incluido_en_semana,
   });
+
+  return antAvisoId;
 }
 
 /** Al cerrar o archivar una orden, quita el bloqueo en avisos más nuevos que apuntaban a esa orden. */

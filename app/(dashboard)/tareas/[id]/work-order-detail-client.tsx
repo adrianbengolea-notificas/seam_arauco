@@ -801,7 +801,51 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
         </p>
       ) : null}
 
-      {workOrder.alerta_cerrar_para_aviso_sap?.n_aviso ? (
+      {workOrder.reemplazada_por_ot_cerrada?.work_order_id ? (
+        <div
+          className="rounded-xl border border-emerald-500/50 bg-emerald-50 px-4 py-3 text-sm text-emerald-950 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-100"
+          role="status"
+        >
+          <p>
+            <span className="font-semibold">Este mantenimiento ya se cerró en otra orden</span> (n.º{" "}
+            <span className="font-mono">
+              {workOrder.reemplazada_por_ot_cerrada.n_ot ||
+                workOrder.reemplazada_por_ot_cerrada.n_aviso}
+            </span>
+            {workOrder.reemplazada_por_ot_cerrada.n_aviso &&
+            workOrder.reemplazada_por_ot_cerrada.n_aviso !== workOrder.reemplazada_por_ot_cerrada.n_ot ? (
+              <>
+                {" "}
+                · aviso SAP{" "}
+                <span className="font-mono">{workOrder.reemplazada_por_ot_cerrada.n_aviso}</span>
+              </>
+            ) : null}
+            ). Llegó un aviso SAP nuevo para el mismo equipo; el trabajo vigente quedó en esa orden, ya{" "}
+            <strong>cerrada y firmada</strong>.{" "}
+            {workOrder.estado === "CERRADA" ? (
+              <>
+                Esta orden quedó <strong>cerrada automáticamente</strong> en el sistema al completar la vinculada.
+              </>
+            ) : (
+              <>Al cerrar la orden vinculada, esta pasará a cerrada en el sistema.</>
+            )}
+          </p>
+          <p className="mt-2">
+            <Link
+              href={`/tareas/${workOrder.reemplazada_por_ot_cerrada.work_order_id}`}
+              className="font-semibold underline underline-offset-2"
+            >
+              Ver orden n.º{" "}
+              {workOrder.reemplazada_por_ot_cerrada.n_ot ||
+                workOrder.reemplazada_por_ot_cerrada.n_aviso}{" "}
+              →
+            </Link>
+          </p>
+        </div>
+      ) : null}
+
+      {workOrder.alerta_cerrar_para_aviso_sap?.n_aviso &&
+      !workOrder.reemplazada_por_ot_cerrada?.work_order_id ? (
         <div
           className="rounded-xl border border-red-400/70 bg-red-50 px-4 py-3 text-sm text-red-950 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-100"
           role="alert"

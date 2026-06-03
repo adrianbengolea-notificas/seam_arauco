@@ -2,10 +2,11 @@ import { getAdminDb } from "@/firebase/firebaseAdmin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { propuestaSemanaDocId } from "@/lib/scheduling/propuesta-id";
 import { clearOrdenPreviaPendienteEnProgramaSemanaAdmin } from "@/modules/scheduling/repository";
-import { AVISOS_COLLECTION } from "@/modules/notices/repository";
+import { AVISOS_COLLECTION, getAvisoById } from "@/modules/notices/repository";
 import type { Aviso } from "@/modules/notices/types";
+import { appendHistorialAdmin } from "@/modules/work-orders/repository";
 import type { WorkOrder } from "@/modules/work-orders/types";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, Timestamp as AdminTimestamp } from "firebase-admin/firestore";
 
 const WO_ABIERTA: WorkOrder["estado"][] = [
   "BORRADOR",
@@ -221,6 +222,145 @@ async function quitarOrdenPreviaPendienteEnProgramaPorAviso(aviso: Pick<Aviso, "
     programaDocId: propuestaSemanaDocId(centro, sem),
     avisoFirestoreId: aviso.id,
     avisoNumero: aviso.n_aviso,
+  });
+}
+
+function fechaFinDesdeWorkOrder(wo: WorkOrder): Date | undefined {
+  const fp = wo.fecha_fin_ejecucion;
+  if (fp != null && typeof (fp as { toDate?: () => Date }).toDate === "function") {
+    const d = (fp as { toDate: () => Date }).toDate();
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  return undefined;
+}
+
+async function cerrarOrdenAntecesoraSupersedida(input: {
+  antecesorWorkOrderId: string;
+  ordenSucesoraId: string;
+  ordenSucesoraNOt: string;
+  ordenSucesoraNAviso?: string;
+  fechaEjecucion?: Date;
+  actorUid?: string;
+}): Promise<void> {
+  const antWoId = input.antecesorWorkOrderId.trim();
+  if (!antWoId) return;
+
+  const db = getAdminDb();
+  const ref = db.collection(COLLECTIONS.work_orders).doc(antWoId);
+  const snap = await ref.get();
+  if (!snap.exists) return;
+
+  const wo = { id: snap.id, ...(snap.data() as Omit<WorkOrder, "id">) } as WorkOrder;
+  if (wo.archivada === true) return;
+
+  const reemplazada = {
+    work_order_id: input.ordenSucesoraId.trim(),
+    n_ot: input.ordenSucesoraNOt.trim() || input.ordenSucesoraId.trim(),
+    ...(input.ordenSucesoraNAviso?.trim() ? { n_aviso: input.ordenSucesoraNAviso.trim() } : {}),
+  };
+
+  const nSucesora = reemplazada.n_ot;
+  const motivo = `Cerrada automáticamente: el mantenimiento se completó en la orden n.º ${nSucesora}${
+    reemplazada.n_aviso ? ` (aviso SAP ${reemplazada.n_aviso})` : ""
+  }.`;
+
+  if (wo.estado !== "CERRADA" && wo.estado !== "ANULADA") {
+    const fe =
+      input.fechaEjecucion ??
+      fechaFinDesdeWorkOrder(wo) ??
+      new Date();
+    await ref.set(
+      {
+        estado: "CERRADA",
+        fecha_fin_ejecucion: AdminTimestamp.fromDate(fe),
+        reemplazada_por_ot_cerrada: reemplazada,
+        alerta_cerrar_para_aviso_sap: FieldValue.delete(),
+        cierre_modo: "supersedida_por_ot_sucesora",
+        cierre_motivo: motivo,
+        updated_at: FieldValue.serverTimestamp(),
+      } as Record<string, unknown>,
+      { merge: true },
+    );
+
+    await appendHistorialAdmin(antWoId, {
+      tipo: "CIERRE",
+      actor_uid: input.actorUid?.trim() || "sistema",
+      payload: {
+        modo: "supersedida_por_ot_sucesora",
+        ordenSucesoraId: input.ordenSucesoraId.trim(),
+        ordenSucesoraNOt: nSucesora,
+        ...(reemplazada.n_aviso ? { ordenSucesoraNAviso: reemplazada.n_aviso } : {}),
+        motivo,
+      },
+    });
+  } else {
+    await ref.set(
+      {
+        reemplazada_por_ot_cerrada: reemplazada,
+        alerta_cerrar_para_aviso_sap: FieldValue.delete(),
+        updated_at: FieldValue.serverTimestamp(),
+      } as Record<string, unknown>,
+      { merge: true },
+    );
+  }
+
+  const aid = (wo.aviso_id ?? "").trim();
+  if (aid) {
+    const av = await getAvisoById(aid);
+    if (av?.work_order_id?.trim() === antWoId) {
+      await db
+        .collection(AVISOS_COLLECTION)
+        .doc(aid)
+        .set(
+          {
+            work_order_id: FieldValue.delete(),
+            estado: "ABIERTO",
+            updated_at: FieldValue.serverTimestamp(),
+          } as Record<string, unknown>,
+          { merge: true },
+        );
+    }
+  }
+
+  await limpiarAntecesorAlCerrarOrden(antWoId);
+}
+
+/**
+ * Al cerrar la OT del aviso nuevo: cierra la orden anterior, limpia antecesor en aviso/programa
+ * (invocar antes de borrar `antecesor_orden_abierta` del aviso del número nuevo).
+ */
+export async function registrarAntecesorSupersedidoAlCerrarOrdenSucesora(input: {
+  ordenCerradaId: string;
+  ordenCerradaNOt: string;
+  avisoId: string;
+  ordenCerradaNAviso?: string;
+  fechaEjecucion?: Date;
+  actorUid?: string;
+}): Promise<void> {
+  const avisoId = input.avisoId.trim();
+  const ordenCerradaId = input.ordenCerradaId.trim();
+  if (!avisoId || !ordenCerradaId) return;
+
+  const aviso = await getAvisoById(avisoId);
+  if (!aviso) return;
+
+  const antWoId = aviso.antecesor_orden_abierta?.work_order_id?.trim();
+  if (antWoId) {
+    await cerrarOrdenAntecesoraSupersedida({
+      antecesorWorkOrderId: antWoId,
+      ordenSucesoraId: ordenCerradaId,
+      ordenSucesoraNOt: input.ordenCerradaNOt,
+      ordenSucesoraNAviso: input.ordenCerradaNAviso,
+      fechaEjecucion: input.fechaEjecucion,
+      actorUid: input.actorUid,
+    });
+  }
+
+  await quitarOrdenPreviaPendienteEnProgramaPorAviso({
+    id: aviso.id,
+    n_aviso: aviso.n_aviso ?? aviso.id,
+    centro: aviso.centro ?? "",
+    incluido_en_semana: aviso.incluido_en_semana,
   });
 }
 

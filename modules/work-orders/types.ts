@@ -79,6 +79,15 @@ export type WorkOrder = {
   /** SAP emitió un aviso nuevo para el mismo mantenimiento: cerrar esta orden antes de operar el nuevo número. */
   alerta_cerrar_para_aviso_sap?: { aviso_id: string; n_aviso: string };
   /**
+   * La orden sucesora (aviso SAP nuevo) ya cerró el mantenimiento; esta quedó sin efecto operativo.
+   * Se escribe al cerrar la OT vinculada que tenía `antecesor_orden_abierta` apuntando acá.
+   */
+  reemplazada_por_ot_cerrada?: {
+    work_order_id: string;
+    n_ot: string;
+    n_aviso?: string;
+  };
+  /**
    * Correctivo: equipo/ubicación descrita por el técnico porque no existe en el catálogo de activos (`asset_id` vacío).
    * En preventivos no se usa — siempre debe haber activo maestro vinculado.
    */
@@ -121,8 +130,11 @@ export type WorkOrder = {
   archivada_at?: Timestamp | null;
   archivada_por_uid?: string;
   motivo_cierre?: string;
-  /** `empalme_documentado` = cierre histórico fuera del flujo normal (planilla papel previa al CMMS). */
-  cierre_modo?: "normal" | "empalme_documentado";
+  /**
+   * `empalme_documentado` = cierre histórico fuera del flujo normal.
+   * `supersedida_por_ot_sucesora` = cierre automático al cerrar la OT del aviso SAP nuevo vinculado.
+   */
+  cierre_modo?: "normal" | "empalme_documentado" | "supersedida_por_ot_sucesora";
   cierre_motivo?: string;
   cierre_evidencia_url?: string;
   /** Técnico en planta (texto libre; no requiere usuario del sistema). */

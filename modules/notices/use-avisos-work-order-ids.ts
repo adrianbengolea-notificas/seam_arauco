@@ -14,7 +14,8 @@ function chunk<T>(arr: T[], size: number): T[][] {
 }
 
 /**
- * Para cada id de documento `avisos/{id}`, devuelve `work_order_id` si existe (vínculo en vivo con la OT).
+ * Para cada id de documento `avisos/{id}`, devuelve el id de OT para estado en programa:
+ * `work_order_id` si hay orden activa, si no `ultima_ejecucion_ot_id` tras el cierre.
  * Usado en programa publicado para alinear el color del chip con lo que ve el panel lateral (mismo criterio que el drawer).
  */
 export function useAvisosWorkOrderIdsByDocIds(
@@ -91,9 +92,10 @@ export function useAvisosWorkOrderIdsByDocIds(
               seen.add(d.id);
               const data = d.data() as {
                 work_order_id?: string;
+                ultima_ejecucion_ot_id?: string;
                 antecesor_orden_abierta?: { work_order_id?: string };
               };
-              const wo = data.work_order_id?.trim();
+              const wo = data.work_order_id?.trim() || data.ultima_ejecucion_ot_id?.trim();
               if (wo) acc.set(d.id, wo);
               else acc.delete(d.id);
               const ant = data.antecesor_orden_abierta?.work_order_id?.trim();

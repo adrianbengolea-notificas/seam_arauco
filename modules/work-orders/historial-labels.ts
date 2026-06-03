@@ -185,6 +185,12 @@ export function historialEventoTextoUsuario(
     case "FIRMA_USUARIO":
       return conActor("Firma del usuario de planta registrada", nombre);
     case "CIERRE":
+      if (str(p.modo) === "supersedida_por_ot_sucesora") {
+        const nOt = str(p.ordenSucesoraNOt);
+        return nOt
+          ? conActor(`OT cerrada automáticamente (mantenimiento completado en orden n.º ${nOt})`, nombre)
+          : conActor("OT cerrada automáticamente (orden sucesora vinculada)", nombre);
+      }
       return conActor("OT cerrada", nombre);
     case "CIERRE_HISTORICO":
       return conActor("Orden registrada como completada en fecha histórica (empalme documentado)", nombre);

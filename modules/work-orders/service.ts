@@ -1,7 +1,10 @@
 import { getAdminDb } from "@/firebase/firebaseAdmin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { AppError } from "@/lib/errors/app-error";
-import { limpiarAntecesorAlCerrarOrden } from "@/lib/mantenimiento/antecesor-orden-admin";
+import {
+  limpiarAntecesorAlCerrarOrden,
+  registrarAntecesorSupersedidoAlCerrarOrdenSucesora,
+} from "@/lib/mantenimiento/antecesor-orden-admin";
 import { buildClaveMantenimiento } from "@/lib/mantenimiento/clave-mantenimiento";
 import { getPlanMantenimientoAdmin, setPlanIncluidoOtPendiente, updatePlanMantenimientoAfterClose } from "@/lib/plan-mantenimiento/admin";
 import { ASSETS_COLLECTION, getAssetById } from "@/modules/assets/repository";
@@ -1272,6 +1275,26 @@ export async function runWorkOrderPadCloseFollowUp(
     );
   }
 
+  const avisoAntesSync = await resolveAvisoVinculadoAWorkOrder(wo);
+  if (avisoAntesSync?.id) {
+    let fechaAntecesor = opts?.fechaEjecucionReferencia;
+    if (!fechaAntecesor && wo.fecha_fin_ejecucion != null) {
+      const toDate = (wo.fecha_fin_ejecucion as { toDate?: () => Date }).toDate;
+      if (typeof toDate === "function") {
+        const d = toDate.call(wo.fecha_fin_ejecucion);
+        if (!Number.isNaN(d.getTime())) fechaAntecesor = d;
+      }
+    }
+    await registrarAntecesorSupersedidoAlCerrarOrdenSucesora({
+      ordenCerradaId: wo.id,
+      ordenCerradaNOt: wo.n_ot,
+      avisoId: avisoAntesSync.id,
+      ordenCerradaNAviso: avisoAntesSync.n_aviso ?? wo.aviso_numero,
+      fechaEjecucion: fechaAntecesor,
+      actorUid: wo.cerrada_por_uid,
+    });
+  }
+
   await syncAvisoYPlanFechaEjecucion(wo, fechaEjecucion, opts?.avisoIdsAdicionalesCerrar);
 
   const dest = [
@@ -1551,6 +1574,7 @@ export async function closeWorkOrder(input: {
   });
 
   await limpiarAntecesorAlCerrarOrden(input.workOrderId);
+  await runWorkOrderPadCloseFollowUp(input.workOrderId);
 }
 
 export async function updateWorkOrderInformeText(input: {

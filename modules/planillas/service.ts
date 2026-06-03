@@ -1,7 +1,7 @@
 import { AppError } from "@/lib/errors/app-error";
 import type { ItemRespuesta, PlanillaRespuesta } from "@/lib/firestore/types";
 import { getAssetById } from "@/modules/assets/repository";
-import { getAvisoById } from "@/modules/notices/repository";
+import { resolveAvisoVinculadoAWorkOrder } from "@/modules/work-orders/resolve-aviso-vinculado";
 import { uploadFirmaDigitalFromDataUrl } from "@/modules/work-orders/firma-storage-admin";
 import { planillaItemsOkSinFirmas, validatePlanillaFirmable } from "@/lib/planillas/form-utils";
 import { selectTemplate } from "@/lib/planillas/select-template";
@@ -100,7 +100,7 @@ export async function iniciarPlanillaService(input: {
   const assetIdTrim = wo.asset_id?.trim() ?? "";
   const [asset, aviso] = await Promise.all([
     assetIdTrim ? getAssetById(assetIdTrim) : Promise.resolve(null),
-    wo.aviso_id?.trim() ? getAvisoById(wo.aviso_id.trim()) : Promise.resolve(null),
+    resolveAvisoVinculadoAWorkOrder(wo),
   ]);
   const templateId = selectTemplate(wo, {
     especialidadAviso: aviso?.especialidad,

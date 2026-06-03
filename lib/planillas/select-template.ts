@@ -4,39 +4,55 @@ import { workOrderSubtipo } from "@/modules/work-orders/types";
 
 const ESPECIALIDAD_VALIDAS = new Set<string>(["AA", "ELECTRICO", "GG", "HG"]);
 
+function especialidadValida(raw: string | null | undefined): Especialidad | null {
+  const t = raw?.trim();
+  return t && ESPECIALIDAD_VALIDAS.has(t) ? (t as Especialidad) : null;
+}
+
+function esEspecialidadGenerica(esp: Especialidad | null | undefined): boolean {
+  return !esp || esp === "GG";
+}
+
 export type SelectTemplateOptions = {
   /**
-   * Especialidad del aviso en `avisos/{id}.especialidad`. Si está definida y es válida, manda
-   * para elegir plantilla (p. ej. AA vs GG) aunque la OT o el activo difieran.
+   * Especialidad del aviso en `avisos/{id}.especialidad`. Corrige la OT cuando esta es genérica
+   * (`GG` o vacía), p. ej. aviso AA sobre OT GG. No pisa una especialidad concreta ya definida en la OT.
    */
   especialidadAviso?: Especialidad | null;
   /**
-   * Especialidad del activo en catálogo (`especialidad_predeterminada`). Solo se usa si no hay
-   * `especialidadAviso` válida; y solo corrige cuando la OT tiene especialidad genérica (`GG` o vacía).
+   * Especialidad del activo en catálogo (`especialidad_predeterminada`). Misma regla que el aviso:
+   * solo corrige cuando la OT (y el aviso) siguen siendo genéricos.
    */
   especialidadActivo?: Especialidad | null;
 };
 
+/** Combina OT, aviso y activo: gana la primera especialidad concreta (AA, ELECTRICO, HG); GG al final. */
+export function resolveEspecialidadParaPlantilla(
+  ot: Pick<WorkOrder, "especialidad">,
+  opts?: SelectTemplateOptions,
+): Especialidad {
+  const fuentes: (Especialidad | null | undefined)[] = [
+    ot.especialidad,
+    opts?.especialidadAviso,
+    opts?.especialidadActivo,
+  ];
+
+  for (const raw of fuentes) {
+    const esp = especialidadValida(raw);
+    if (esp && !esEspecialidadGenerica(esp)) return esp;
+  }
+  for (const raw of fuentes) {
+    const esp = especialidadValida(raw);
+    if (esp) return esp;
+  }
+  return ot.especialidad;
+}
+
 /**
- * Elige el id de documento en `planilla_templates/{id}` según especialidad (prioriza aviso si se
- * informa) y subtipo de la OT.
+ * Elige el id de documento en `planilla_templates/{id}` según especialidad resuelta y subtipo de la OT.
  */
 export function selectTemplate(ot: WorkOrder, opts?: SelectTemplateOptions): string {
-  const avisoEsp = opts?.especialidadAviso?.trim();
-  const espFromAviso =
-    avisoEsp && ESPECIALIDAD_VALIDAS.has(avisoEsp) ? (avisoEsp as Especialidad) : null;
-
-  let esp: Especialidad;
-  if (espFromAviso) {
-    esp = espFromAviso;
-  } else {
-    const espPred = opts?.especialidadActivo?.trim();
-    const otEspIsGeneric = !ot.especialidad || ot.especialidad === "GG";
-    esp =
-      espPred && ESPECIALIDAD_VALIDAS.has(espPred) && otEspIsGeneric
-        ? (espPred as Especialidad)
-        : ot.especialidad;
-  }
+  const esp = resolveEspecialidadParaPlantilla(ot, opts);
 
   if (esp === "GG") return "GG";
 

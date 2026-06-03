@@ -1230,7 +1230,7 @@ function AvisoDrawer({
       />
       <aside
         className={cn(
-          "fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-border bg-background shadow-2xl",
+          "fixed inset-y-0 right-0 z-50 flex w-full max-w-md min-h-0 flex-col border-l border-border bg-background shadow-2xl",
         )}
         role="dialog"
         aria-modal="true"
@@ -1252,7 +1252,8 @@ function AvisoDrawer({
             <X className="h-4 w-4" aria-hidden />
           </Button>
         </div>
-        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4 text-sm">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div className="space-y-4 px-4 py-4 text-sm">
           {aviso.ordenPreviaPendiente || antecesor?.work_order_id ? (
             <div
               className="rounded-lg border border-amber-400/70 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100"
@@ -1294,7 +1295,7 @@ function AvisoDrawer({
               {aviso.urgente ? "Urgente" : aviso.tipo === "correctivo" ? "Correctivo" : "Preventivo"}
             </Badge>
           </div>
-        </div>
+          </div>
         {puedeReprogramar && semanasOpciones.length > 0 ? (
           <form
             className="space-y-3 border-t border-border px-4 py-4"
@@ -1505,6 +1506,7 @@ function AvisoDrawer({
             )}
           </div>
         ) : null}
+        </div>
       </aside>
     </>
   );

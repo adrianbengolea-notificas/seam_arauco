@@ -1267,7 +1267,7 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
 
       {corrFechaOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 overflow-y-auto bg-black/50 p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="corr-fecha-dialog-title"
@@ -1275,8 +1275,9 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
             if (e.target === e.currentTarget && !corrBusy) setCorrFechaOpen(false);
           }}
         >
+          <div className="flex min-h-full items-center justify-center py-4">
           <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
+            className="my-auto w-full max-w-lg rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="corr-fecha-dialog-title" className="text-lg font-semibold text-foreground">
@@ -1328,6 +1329,7 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
                 </Button>
               </div>
             </form>
+          </div>
           </div>
         </div>
       ) : null}

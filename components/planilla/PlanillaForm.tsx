@@ -506,6 +506,12 @@ export function PlanillaForm({
                   la <span className="font-medium">Observación</span> de esa misma fila (el botón solo no alcanza).
                 </p>
               ) : null}
+              {template.id === "ELEC" ? (
+                <p className="text-xs text-zinc-700 dark:text-zinc-300">
+                  Las verificaciones no tienen que estar todas marcadas para cerrar (igual que en planilla AA). Si cargás{" "}
+                  <span className="font-medium">Cant. en falla</span> mayor a cero, completá el comentario de esa fila.
+                </p>
+              ) : null}
             </div>
             {errorFirma ? (
               <div

@@ -201,9 +201,9 @@ export function validatePlanillaFirmable(
         if (!it.obligatorio) continue;
         const key = planillaItemKey(sec.id, it.id);
         const ir = respuesta.respuestas[key];
-        /** Checklist (cualquier plantilla): se puede firmar y cerrar la OT sin marcar todos los ítems. Siguen valiendo observaciones obligatorias por fila/estado/acción. */
-        const checklistPermiteSinMarcarTodo = sec.tipo === "checklist";
-        if (!checklistPermiteSinMarcarTodo && !seccionItemCompleto(sec, it.id, respuesta)) {
+        /** Checklist (AA, etc.) y grilla (ELEC preventiva): se puede firmar y cerrar sin marcar todos los ítems. Siguen valiendo observaciones por estado/acción y comentarios si hay fallas en grilla. */
+        const permiteCerrarSinMarcarTodo = sec.tipo === "checklist" || sec.tipo === "grilla";
+        if (!permiteCerrarSinMarcarTodo && !seccionItemCompleto(sec, it.id, respuesta)) {
           return { ok: false, mensaje: `Falta completar: ${it.label}` };
         }
         if (template.id === "GG" && it.acciones?.length && ir?.accionesRespuestas) {

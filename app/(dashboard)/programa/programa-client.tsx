@@ -387,6 +387,7 @@ function clasesProgramaChip(
     ordenServicioIdEfectiva: string | undefined;
     estado: WorkOrderEstado | undefined;
     cargando: boolean;
+    ordenPreviaPendienteEfectiva?: boolean;
   },
 ): string {
   const woId = ctx.ordenServicioIdEfectiva?.trim();
@@ -415,10 +416,29 @@ function clasesProgramaChip(
     }
   }
 
-  if (aviso.ordenPreviaPendiente) {
+  if (ctx.ordenPreviaPendienteEfectiva ?? aviso.ordenPreviaPendiente) {
     return cn(inner, "ring-2 ring-red-500/65 ring-offset-1 dark:ring-offset-zinc-950");
   }
   return inner;
+}
+
+function ordenPreviaPendienteEfectivaEnChip(
+  aviso: AvisoSlot,
+  antecesorWorkOrderIdPorAvisoDocId: Map<string, string>,
+  estadosPorId: Map<string, WorkOrderEstado>,
+  archivadaPorId: Map<string, boolean>,
+  loadingEstados: boolean,
+): boolean {
+  const docId = aviso.avisoFirestoreId?.trim();
+  const antWo = docId ? antecesorWorkOrderIdPorAvisoDocId.get(docId)?.trim() : undefined;
+  if (docId && antWo) {
+    if (loadingEstados) return Boolean(aviso.ordenPreviaPendiente);
+    if (archivadaPorId.get(antWo) === true) return false;
+    const st = estadosPorId.get(antWo);
+    if (!st) return false;
+    return st !== "CERRADA" && st !== "ANULADA";
+  }
+  return Boolean(aviso.ordenPreviaPendiente);
 }
 
 function LeyendaColoresProgramaSemanal() {
@@ -560,8 +580,8 @@ type FiltroVistaTecnico = {
   especialidadesPrograma: EspecialidadPrograma[];
 };
 
-/** Técnico: solo chips con OT abierta legible (propias o pool sin asignar). */
-function avisoVisibleOrdenAbiertaTecnico(
+/** Técnico: chips con OT legible (propias o pool sin asignar); oculta solo anuladas. */
+function avisoVisibleProgramaTecnico(
   a: AvisoSlot,
   workOrderIdPorAvisoDocId: Map<string, string>,
   estadosPorId: Map<string, WorkOrderEstado>,
@@ -572,7 +592,7 @@ function avisoVisibleOrdenAbiertaTecnico(
   if (loadingEstados) return true;
   const estado = estadosPorId.get(ordenId);
   if (!estado) return false;
-  return estado !== "CERRADA" && estado !== "ANULADA";
+  return estado !== "ANULADA";
 }
 
 function avisoVisibleEnGrilla(
@@ -586,7 +606,7 @@ function avisoVisibleEnGrilla(
   busqueda?: string,
   ctxBusqueda?: ContextoBusquedaAvisoPrograma,
 ): boolean {
-  if (filtroVistaTecnico && !avisoVisibleOrdenAbiertaTecnico(a, workOrderIdPorAvisoDocId, estadosPorId, loadingEstados)) {
+  if (filtroVistaTecnico && !avisoVisibleProgramaTecnico(a, workOrderIdPorAvisoDocId, estadosPorId, loadingEstados)) {
     return false;
   }
   if (!avisoPasaBusqueda(a, busqueda ?? "", ctxBusqueda)) return false;
@@ -724,6 +744,7 @@ function ProgramaChipAvisoConArrastre({
   ordenServicioIdEfectiva,
   onDragPayloadStart,
   onDragPayloadEnd,
+  ordenPreviaPendienteEfectiva,
 }: {
   programaDocId: string;
   loc: string;
@@ -737,6 +758,7 @@ function ProgramaChipAvisoConArrastre({
   ordenServicioIdEfectiva: string | undefined;
   onDragPayloadStart?: (payload: ProgramaAvisoDragPayload) => void;
   onDragPayloadEnd?: () => void;
+  ordenPreviaPendienteEfectiva: boolean;
 }) {
   const omitirClickTrasArrastre = useRef(false);
 
@@ -752,10 +774,9 @@ function ProgramaChipAvisoConArrastre({
       } satisfies ProgramaAvisoDragPayload)
     : null;
 
-  const tituloChip =
-    c.aviso.ordenPreviaPendiente
-      ? `Aviso ${c.aviso.numero} — orden previa pendiente de cierre`
-      : `Aviso ${c.aviso.numero}`;
+  const tituloChip = ordenPreviaPendienteEfectiva
+    ? `Aviso ${c.aviso.numero} — orden previa pendiente de cierre`
+    : `Aviso ${c.aviso.numero}`;
 
   return (
     <button
@@ -794,6 +815,7 @@ function ProgramaChipAvisoConArrastre({
           ordenServicioIdEfectiva,
           estado: estadoServicio,
           cargando: cargandoEstadoServicio,
+          ordenPreviaPendienteEfectiva,
         }),
       )}
     >
@@ -1055,6 +1077,20 @@ function AvisoDrawer({
   }, [woVinculada?.id, woVinculada?.fecha_fin_ejecucion]);
 
   const antecesor = avisoFb?.antecesor_orden_abierta;
+  const antecesorWoId = antecesor?.work_order_id?.trim() || undefined;
+  const { workOrder: woAntecesor, loading: woAntecesorLoading } = useWorkOrderLive(antecesorWoId);
+  const antecesorSigueBloqueando =
+    Boolean(antecesorWoId) &&
+    !woAntecesorLoading &&
+    woAntecesor != null &&
+    woAntecesor.archivada !== true &&
+    woAntecesor.estado !== "CERRADA" &&
+    woAntecesor.estado !== "ANULADA";
+  /** El slot publicado puede quedar desactualizado; si tenemos el aviso en vivo, confiamos en Firestore. */
+  const ordenPreviaPendienteEfectiva =
+    avisoDocId && !avisoFbLoading && (!antecesorWoId || !woAntecesorLoading)
+      ? antecesorSigueBloqueando
+      : Boolean(aviso.ordenPreviaPendiente || antecesorWoId);
 
   async function onSubmitReprogramar(e: FormEvent) {
     e.preventDefault();
@@ -1254,7 +1290,7 @@ function AvisoDrawer({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <div className="space-y-4 px-4 py-4 text-sm">
-          {aviso.ordenPreviaPendiente || antecesor?.work_order_id ? (
+          {ordenPreviaPendienteEfectiva ? (
             <div
               className="rounded-lg border border-amber-400/70 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100"
               role="alert"
@@ -1264,13 +1300,13 @@ function AvisoDrawer({
                 Este aviso es el número nuevo, pero el trabajo pendiente sigue en la orden anterior. Recomendamos
                 terminarla antes de abrir o programar otra; el sistema las mantiene vinculadas.
               </p>
-              {antecesor?.work_order_id ? (
+              {antecesorSigueBloqueando && antecesorWoId ? (
                 <p className="mt-2">
                   <Link
-                    href={`/tareas/${antecesor.work_order_id}`}
+                    href={`/tareas/${antecesorWoId}`}
                     className="font-semibold underline underline-offset-2"
                   >
-                    Ir a orden n.º {antecesor.n_aviso || antecesor.n_ot}
+                    Ir a orden n.º {antecesor?.n_aviso || antecesor?.n_ot}
                   </Link>
                 </p>
               ) : null}
@@ -1918,11 +1954,16 @@ export function ProgramaClient() {
     return [...s];
   }, [programaParaGrilla]);
 
-  const { workOrderIdPorAvisoDocId } = useAvisosWorkOrderIdsByDocIds(avisoFirestoreIdsParaSyncWo);
+  const { workOrderIdPorAvisoDocId, antecesorWorkOrderIdPorAvisoDocId } =
+    useAvisosWorkOrderIdsByDocIds(avisoFirestoreIdsParaSyncWo);
 
   const idsOrdenServicioParaEstados = useMemo(() => {
     const s = new Set<string>();
     for (const w of workOrderIdPorAvisoDocId.values()) {
+      const t = w?.trim();
+      if (t) s.add(t);
+    }
+    for (const w of antecesorWorkOrderIdPorAvisoDocId.values()) {
       const t = w?.trim();
       if (t) s.add(t);
     }
@@ -1935,9 +1976,9 @@ export function ProgramaClient() {
       }
     }
     return [...s];
-  }, [programaParaGrilla, workOrderIdPorAvisoDocId]);
+  }, [programaParaGrilla, workOrderIdPorAvisoDocId, antecesorWorkOrderIdPorAvisoDocId]);
 
-  const { estados: estadosServicioPorId, loading: loadingEstadosServicio } =
+  const { estados: estadosServicioPorId, archivadaPorId, loading: loadingEstadosServicio } =
     useWorkOrderEstadosForIds(idsOrdenServicioParaEstados);
 
   const docCentroDesalineado = Boolean(
@@ -2191,7 +2232,7 @@ export function ProgramaClient() {
                 <p className="mt-1 text-xs text-muted-foreground">
                   Esta vista usa el centro de tu perfil.
                   {esRolTecnico
-                    ? " Ves el programa de tu especialidad: órdenes abiertas (asignadas a vos o sin asignar) en cualquier semana del selector."
+                    ? " Ves el programa de tu especialidad (asignadas a vos o sin asignar), incluidas las completadas, en cualquier semana del selector."
                     : null}
                 </p>
               )}
@@ -2306,7 +2347,7 @@ export function ProgramaClient() {
                   {esRolTecnico ? (
                     <>
                       {" "}
-                      Ves órdenes abiertas de tu especialidad (asignadas a vos o sin asignar). Cambiá la semana arriba
+                      Ves órdenes de tu especialidad (asignadas a vos o sin asignar), incluidas las completadas. Cambiá la semana arriba
                       para organizarte en el tiempo.
                       <HelpIconTooltip
                         variant="info"
@@ -2317,11 +2358,12 @@ export function ProgramaClient() {
                         <div className="block space-y-2 text-left">
                           <p>
                             La grilla muestra el <strong>programa publicado</strong> filtrado por la{" "}
-                            <strong>especialidad de tu perfil</strong> y solo chips con una{" "}
-                            <strong>orden de trabajo abierta</strong> que podés leer (la tuya o del pool sin asignar).
+                            <strong>especialidad de tu perfil</strong> y chips con una{" "}
+                            <strong>orden de trabajo</strong> que podés leer (la tuya o del pool sin asignar),{" "}
+                            <strong>incluidas las cerradas</strong>.
                           </p>
                           <p className="text-muted-foreground">
-                            Usá el selector de <strong>semana</strong> para ver otras semanas. Las cerradas o asignadas a
+                            Usá el selector de <strong>semana</strong> para ver otras semanas. Las anuladas o asignadas a
                             otro operario no aparecen acá; el detalle completo está en <strong>Tareas</strong>.
                           </p>
                         </div>
@@ -2862,6 +2904,13 @@ export function ProgramaClient() {
                                   c.aviso,
                                   workOrderIdPorAvisoDocId,
                                 );
+                                const ordenPreviaChip = ordenPreviaPendienteEfectivaEnChip(
+                                  c.aviso,
+                                  antecesorWorkOrderIdPorAvisoDocId,
+                                  estadosServicioPorId,
+                                  archivadaPorId,
+                                  loadingEstadosServicio,
+                                );
                                 return (
                                   <ProgramaChipAvisoConArrastre
                                     key={`${c.aviso.numero}-${i}`}
@@ -2870,6 +2919,7 @@ export function ProgramaClient() {
                                     diaCol={d}
                                     c={c}
                                     ordenServicioIdEfectiva={ordenIdEfectiva}
+                                    ordenPreviaPendienteEfectiva={ordenPreviaChip}
                                     {...chipEstadoServicioProps(
                                       ordenIdEfectiva,
                                       estadosServicioPorId,
@@ -2988,6 +3038,13 @@ export function ProgramaClient() {
                               c.aviso,
                               workOrderIdPorAvisoDocId,
                             );
+                            const ordenPreviaChip = ordenPreviaPendienteEfectivaEnChip(
+                              c.aviso,
+                              antecesorWorkOrderIdPorAvisoDocId,
+                              estadosServicioPorId,
+                              archivadaPorId,
+                              loadingEstadosServicio,
+                            );
                             return (
                               <ProgramaChipAvisoConArrastre
                                 key={`${c.aviso.numero}-${i}`}
@@ -2996,6 +3053,7 @@ export function ProgramaClient() {
                                 diaCol={d}
                                 c={c}
                                 ordenServicioIdEfectiva={ordenIdEfectiva}
+                                ordenPreviaPendienteEfectiva={ordenPreviaChip}
                                 {...chipEstadoServicioProps(
                                   ordenIdEfectiva,
                                   estadosServicioPorId,
@@ -3041,8 +3099,8 @@ export function ProgramaClient() {
         <p className="text-sm text-muted-foreground">
           {esRolTecnico
             ? busqueda.trim()
-              ? "No hay órdenes abiertas de tu especialidad que coincidan con la búsqueda o los filtros. Probá otro término; la búsqueda revisa todas las semanas publicadas."
-              : "No hay órdenes abiertas de tu especialidad en esta semana con los filtros seleccionados. Probá otra semana en el selector."
+              ? "No hay órdenes de tu especialidad que coincidan con la búsqueda o los filtros. Probá otro término; la búsqueda revisa todas las semanas publicadas."
+              : "No hay órdenes de tu especialidad en esta semana con los filtros seleccionados. Probá otra semana en el selector."
             : busqueda.trim()
               ? "No hay avisos que coincidan con la búsqueda o los filtros seleccionados (se buscó en todas las semanas publicadas)."
               : "No hay avisos con los filtros seleccionados."}

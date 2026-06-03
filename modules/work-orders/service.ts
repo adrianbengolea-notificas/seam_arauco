@@ -949,6 +949,8 @@ export async function archiveWorkOrderSuperadmin(input: {
     });
   }
 
+  await limpiarAntecesorAlCerrarOrden(input.workOrderId);
+
   await appendHistorialAdmin(input.workOrderId, {
     tipo: "ARCHIVADA",
     actor_uid: input.actorUid,
@@ -1340,6 +1342,13 @@ export async function correctWorkOrderFechaFinEjecucion(input: {
 
   const ref = adminWorkOrderRef(input.workOrderId);
   let fechaAnteriorIso: string | null = null;
+  let mismaFechaReparacionSap = false;
+
+  const snapAntecesorPre = await getAdminDb()
+    .collection(COLLECTIONS.avisos)
+    .where("antecesor_orden_abierta.work_order_id", "==", input.workOrderId)
+    .limit(1)
+    .get();
 
   await getAdminDb().runTransaction(async (txn) => {
     const snap = await txn.get(ref);
@@ -1360,7 +1369,13 @@ export async function correctWorkOrderFechaFinEjecucion(input: {
     fechaAnteriorIso = timestampToIsoDateLocal(wo.fecha_fin_ejecucion ?? null);
     const fechaNuevaIso = isoDateLocalFromDate(feNueva);
     if (fechaAnteriorIso === fechaNuevaIso) {
-      throw new AppError("CONFLICT", "La fecha indicada coincide con la fecha de realización actual");
+      const cierreSapPendiente =
+        Boolean(wo.alerta_cerrar_para_aviso_sap?.aviso_id?.trim()) || !snapAntecesorPre.empty;
+      if (!cierreSapPendiente) {
+        throw new AppError("CONFLICT", "La fecha indicada coincide con la fecha de realización actual");
+      }
+      mismaFechaReparacionSap = true;
+      return;
     }
 
     txn.update(ref, {
@@ -1369,20 +1384,33 @@ export async function correctWorkOrderFechaFinEjecucion(input: {
     });
   });
 
-  await appendHistorialAdmin(input.workOrderId, {
-    tipo: "FECHA_REALIZACION_CORREGIDA",
-    actor_uid: input.actorUid,
-    payload: {
-      fechaAnterior: fechaAnteriorIso ?? undefined,
-      fechaNueva: isoDateLocalFromDate(feNueva),
-      motivo,
-      actorDisplayName: input.actorDisplayName.trim(),
-    },
-  });
+  if (!mismaFechaReparacionSap) {
+    await appendHistorialAdmin(input.workOrderId, {
+      tipo: "FECHA_REALIZACION_CORREGIDA",
+      actor_uid: input.actorUid,
+      payload: {
+        ...(fechaAnteriorIso ? { fechaAnterior: fechaAnteriorIso } : {}),
+        fechaNueva: isoDateLocalFromDate(feNueva),
+        motivo,
+        actorDisplayName: input.actorDisplayName.trim(),
+      },
+    });
+  }
 
   const woAfter = await getWorkOrderById(input.workOrderId);
   if (woAfter?.estado === "CERRADA") {
-    await syncAvisoYPlanFechaEjecucion(woAfter, input.fechaEjecucion);
+    const avisoIdsAdicionalesCerrar = new Set<string>();
+    if (woAfter.alerta_cerrar_para_aviso_sap?.aviso_id?.trim()) {
+      avisoIdsAdicionalesCerrar.add(woAfter.alerta_cerrar_para_aviso_sap.aviso_id.trim());
+    }
+    const snapAntecesor = await getAdminDb()
+      .collection(COLLECTIONS.avisos)
+      .where("antecesor_orden_abierta.work_order_id", "==", input.workOrderId)
+      .limit(80)
+      .get();
+    for (const d of snapAntecesor.docs) avisoIdsAdicionalesCerrar.add(d.id);
+    await syncAvisoYPlanFechaEjecucion(woAfter, input.fechaEjecucion, [...avisoIdsAdicionalesCerrar]);
+    await limpiarAntecesorAlCerrarOrden(input.workOrderId);
   }
 }
 
@@ -1443,16 +1471,20 @@ export async function closeWorkOrderHistorico(input: {
     txn.update(ref, patch);
   });
 
+  const historialPayload: Record<string, string> = {
+    motivo,
+    fechaEjecucion: input.fechaEjecucion.toISOString(),
+    actorDisplayName: input.actorDisplayName.trim(),
+  };
+  const evHist = input.evidenciaUrl?.trim();
+  if (evHist) historialPayload.evidenciaUrl = evHist;
+  const tnHist = input.tecnicoNombre?.trim();
+  if (tnHist) historialPayload.tecnicoNombre = tnHist;
+
   await appendHistorialAdmin(input.workOrderId, {
     tipo: "CIERRE_HISTORICO",
     actor_uid: input.actorUid,
-    payload: {
-      motivo,
-      fechaEjecucion: input.fechaEjecucion.toISOString(),
-      evidenciaUrl: input.evidenciaUrl?.trim() || undefined,
-      tecnicoNombre: input.tecnicoNombre?.trim() || undefined,
-      actorDisplayName: input.actorDisplayName.trim(),
-    },
+    payload: historialPayload,
   });
 
   const woPre = await getWorkOrderById(input.workOrderId);

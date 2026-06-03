@@ -20,6 +20,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
  */
 export function useWorkOrderEstadosForIds(idsInput: (string | undefined)[] | undefined): {
   estados: Map<string, WorkOrderEstado>;
+  archivadaPorId: Map<string, boolean>;
   loading: boolean;
 } {
   const ids = useMemo(() => {
@@ -32,6 +33,7 @@ export function useWorkOrderEstadosForIds(idsInput: (string | undefined)[] | und
   }, [idsInput]);
 
   const [estados, setEstados] = useState(() => new Map<string, WorkOrderEstado>());
+  const [archivadaPorId, setArchivadaPorId] = useState(() => new Map<string, boolean>());
   const [loading, setLoading] = useState(false);
 
   const idsKey = ids.join("\0");
@@ -41,6 +43,7 @@ export function useWorkOrderEstadosForIds(idsInput: (string | undefined)[] | und
   useEffect(() => {
     if (!ids.length) {
       setEstados(new Map());
+      setArchivadaPorId(new Map());
       setLoading(false);
       return;
     }
@@ -48,6 +51,7 @@ export function useWorkOrderEstadosForIds(idsInput: (string | undefined)[] | und
     let cancelled = false;
     const db = getFirebaseDb();
     const acc = new Map<string, WorkOrderEstado>();
+    const accArch = new Map<string, boolean>();
     unsubsRef.current = [];
     const chunks = chunk(ids, IN_CHUNK);
 
@@ -56,6 +60,7 @@ export function useWorkOrderEstadosForIds(idsInput: (string | undefined)[] | und
       await auth.authStateReady();
       if (cancelled || !auth.currentUser) {
         setEstados(new Map());
+        setArchivadaPorId(new Map());
         setLoading(false);
         return;
       }
@@ -84,13 +89,19 @@ export function useWorkOrderEstadosForIds(idsInput: (string | undefined)[] | und
             const seen = new Set<string>();
             for (const d of snap.docs) {
               seen.add(d.id);
-              const raw = d.data()?.estado as WorkOrderEstado | undefined;
+              const data = d.data() as { estado?: WorkOrderEstado; archivada?: boolean };
+              const raw = data.estado;
               acc.set(d.id, raw ?? "ABIERTA");
+              accArch.set(d.id, data.archivada === true);
             }
             for (const id of chunkIds) {
-              if (!seen.has(id)) acc.delete(id);
+              if (!seen.has(id)) {
+                acc.delete(id);
+                accArch.delete(id);
+              }
             }
             setEstados(new Map(acc));
+            setArchivadaPorId(new Map(accArch));
             marcarPrimerEstado(idx);
           },
           () => {
@@ -109,5 +120,5 @@ export function useWorkOrderEstadosForIds(idsInput: (string | undefined)[] | und
     };
   }, [idsKey]);
 
-  return { estados, loading };
+  return { estados, archivadaPorId, loading };
 }

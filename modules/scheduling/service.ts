@@ -37,6 +37,7 @@ import {
   parseIsoWeekIdFromSemanaParam,
 } from "@/modules/scheduling/iso-week";
 import type { UserProfileWithUid } from "@/modules/users/repository";
+import { getAssetById } from "@/modules/assets/repository";
 import { getAvisoById, updateAviso } from "@/modules/notices/repository";
 import type { Especialidad, TipoAviso } from "@/modules/notices/types";
 import { especialidadDominioAPrograma } from "@/modules/scheduling/especialidad-programa";
@@ -419,15 +420,19 @@ export async function vincularWorkOrderEnProgramaPublicadoDesdeAviso(input: {
   });
 }
 
-function buildAvisoSlotDesdeAviso(aviso: {
-  id: string;
-  n_aviso: string;
-  texto_corto: string;
-  tipo: TipoAviso;
-  urgente?: boolean;
-  ubicacion_tecnica: string;
-  antecesor_orden_abierta?: { work_order_id?: string | null } | null;
-}): AvisoSlot {
+function buildAvisoSlotDesdeAviso(
+  aviso: {
+    id: string;
+    n_aviso: string;
+    texto_corto: string;
+    tipo: TipoAviso;
+    urgente?: boolean;
+    ubicacion_tecnica: string;
+    antecesor_orden_abierta?: { work_order_id?: string | null } | null;
+  },
+  equipoCodigo?: string,
+): AvisoSlot {
+  const codigo = equipoCodigo?.trim();
   return {
     numero: aviso.n_aviso,
     descripcion: aviso.texto_corto || aviso.n_aviso,
@@ -436,6 +441,7 @@ function buildAvisoSlotDesdeAviso(aviso: {
     urgente: aviso.urgente === true,
     ubicacion: aviso.ubicacion_tecnica,
     avisoFirestoreId: aviso.id,
+    ...(codigo ? { equipoCodigo: codigo } : {}),
     ...(aviso.antecesor_orden_abierta?.work_order_id?.trim()
       ? { ordenPreviaPendiente: true }
       : {}),
@@ -485,7 +491,12 @@ export async function addAvisoToPublishedPrograma(input: {
     return;
   }
 
-  const nuevoAviso = buildAvisoSlotDesdeAviso(aviso);
+  let equipoCodigo: string | undefined;
+  if (aviso.asset_id?.trim()) {
+    const asset = await getAssetById(aviso.asset_id.trim());
+    equipoCodigo = asset?.codigo_nuevo?.trim() || aviso.asset_id.trim();
+  }
+  const nuevoAviso = buildAvisoSlotDesdeAviso(aviso, equipoCodigo);
   await appendAvisoToProgramaSemanaAdmin({
     semanaId: input.semanaId,
     centro: aviso.centro,

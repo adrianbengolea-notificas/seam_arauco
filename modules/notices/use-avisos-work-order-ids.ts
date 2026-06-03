@@ -19,7 +19,11 @@ function chunk<T>(arr: T[], size: number): T[][] {
  */
 export function useAvisosWorkOrderIdsByDocIds(
   avisoDocIdsInput: string[] | undefined,
-): { workOrderIdPorAvisoDocId: Map<string, string>; loading: boolean } {
+): {
+  workOrderIdPorAvisoDocId: Map<string, string>;
+  antecesorWorkOrderIdPorAvisoDocId: Map<string, string>;
+  loading: boolean;
+} {
   const ids = useMemo(() => {
     const s = new Set<string>();
     for (const id of avisoDocIdsInput ?? []) {
@@ -30,6 +34,7 @@ export function useAvisosWorkOrderIdsByDocIds(
   }, [avisoDocIdsInput]);
 
   const [map, setMap] = useState(() => new Map<string, string>());
+  const [antecesorMap, setAntecesorMap] = useState(() => new Map<string, string>());
   const [loading, setLoading] = useState(false);
   const idsKey = ids.join("\0");
   const unsubsRef = useRef<(() => void)[]>([]);
@@ -37,6 +42,7 @@ export function useAvisosWorkOrderIdsByDocIds(
   useEffect(() => {
     if (!ids.length) {
       setMap(new Map());
+      setAntecesorMap(new Map());
       setLoading(false);
       return;
     }
@@ -44,6 +50,7 @@ export function useAvisosWorkOrderIdsByDocIds(
     let cancelled = false;
     const db = getFirebaseDb();
     const acc = new Map<string, string>();
+    const accAnt = new Map<string, string>();
     unsubsRef.current = [];
     const chunks = chunk(ids, IN_CHUNK);
 
@@ -52,6 +59,7 @@ export function useAvisosWorkOrderIdsByDocIds(
       await auth.authStateReady();
       if (cancelled || !auth.currentUser) {
         setMap(new Map());
+        setAntecesorMap(new Map());
         setLoading(false);
         return;
       }
@@ -81,14 +89,25 @@ export function useAvisosWorkOrderIdsByDocIds(
             const seen = new Set<string>();
             for (const d of snap.docs) {
               seen.add(d.id);
-              const wo = (d.data() as { work_order_id?: string })?.work_order_id?.trim();
+              const data = d.data() as {
+                work_order_id?: string;
+                antecesor_orden_abierta?: { work_order_id?: string };
+              };
+              const wo = data.work_order_id?.trim();
               if (wo) acc.set(d.id, wo);
               else acc.delete(d.id);
+              const ant = data.antecesor_orden_abierta?.work_order_id?.trim();
+              if (ant) accAnt.set(d.id, ant);
+              else accAnt.delete(d.id);
             }
             for (const id of chunkIds) {
-              if (!seen.has(id)) acc.delete(id);
+              if (!seen.has(id)) {
+                acc.delete(id);
+                accAnt.delete(id);
+              }
             }
             setMap(new Map(acc));
+            setAntecesorMap(new Map(accAnt));
             marcarPrimerEstado(idx);
           },
           () => {
@@ -107,5 +126,5 @@ export function useAvisosWorkOrderIdsByDocIds(
     };
   }, [idsKey]);
 
-  return { workOrderIdPorAvisoDocId: map, loading };
+  return { workOrderIdPorAvisoDocId: map, antecesorWorkOrderIdPorAvisoDocId: antecesorMap, loading };
 }

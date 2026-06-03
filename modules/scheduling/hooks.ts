@@ -379,7 +379,7 @@ export type UseSemanasDisponiblesOptions = {
   incluirOtProgramadasSemana?: boolean;
   /** Semanas donde existe propuesta del motor (supervisor+, reglas Firestore). @default false */
   incluirPropuestasMotorSemana?: boolean;
-  /** Técnico: al sumar semanas desde OTs, solo abiertas en estas especialidades de dominio. */
+  /** Técnico: al sumar semanas desde OTs, filtra por estas especialidades de dominio (incluye cerradas). */
   otSemanasSoloEspecialidades?: Especialidad[];
 };
 
@@ -391,7 +391,7 @@ function otCuentaSemanaDesdeProgramacion(
   const esp = data.especialidad;
   if (!esp || !soloEspecialidades.includes(esp)) return false;
   const st = data.estado;
-  return st !== "CERRADA" && st !== "ANULADA";
+  return st !== "ANULADA";
 }
 
 export function useSemanasDisponibles(

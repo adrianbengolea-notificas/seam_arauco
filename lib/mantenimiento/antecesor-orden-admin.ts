@@ -1,6 +1,8 @@
 import { getAdminDb } from "@/firebase/firebaseAdmin";
-import { AVISOS_COLLECTION } from "@/modules/notices/repository";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { propuestaSemanaDocId } from "@/lib/scheduling/propuesta-id";
+import { clearOrdenPreviaPendienteEnProgramaSemanaAdmin } from "@/modules/scheduling/repository";
+import { AVISOS_COLLECTION } from "@/modules/notices/repository";
 import type { Aviso } from "@/modules/notices/types";
 import type { WorkOrder } from "@/modules/work-orders/types";
 import { FieldValue } from "firebase-admin/firestore";
@@ -91,6 +93,7 @@ async function buscarCandidatosPorClaveEnAvisos(
     for (const s of snaps) {
       if (!s.exists) continue;
       const wo = { id: s.id, ...(s.data() as Omit<WorkOrder, "id">) } as WorkOrder;
+      if (wo.archivada === true) continue;
       if (!woEstaPendienteCierre(wo.estado)) continue;
       const aid = (wo.aviso_id ?? "").trim();
       if (!aid || aid === excluirAvisoId) continue;
@@ -152,7 +155,9 @@ export async function reconcileAntecesorTrasImportar(input: {
       ? await (async () => {
           const wsn = await db.collection(COLLECTIONS.work_orders).doc(elegido.work_order_id).get();
           if (!wsn.exists) return null;
-          const st = (wsn.data() as { estado?: WorkOrder["estado"] }).estado;
+          const wo = wsn.data() as { estado?: WorkOrder["estado"]; archivada?: boolean };
+          if (wo.archivada === true) return null;
+          const st = wo.estado;
           return st && woEstaPendienteCierre(st) ? elegido : null;
         })()
       : null;
@@ -208,7 +213,18 @@ export async function reconcileAntecesorTrasImportar(input: {
   }
 }
 
-/** Al cerrar una orden, quita el bloqueo en avisos más nuevos que apuntaban a esa orden. */
+async function quitarOrdenPreviaPendienteEnProgramaPorAviso(aviso: Pick<Aviso, "id" | "n_aviso" | "centro" | "incluido_en_semana">): Promise<void> {
+  const sem = aviso.incluido_en_semana?.trim();
+  const centro = aviso.centro?.trim();
+  if (!sem || !centro) return;
+  await clearOrdenPreviaPendienteEnProgramaSemanaAdmin({
+    programaDocId: propuestaSemanaDocId(centro, sem),
+    avisoFirestoreId: aviso.id,
+    avisoNumero: aviso.n_aviso,
+  });
+}
+
+/** Al cerrar o archivar una orden, quita el bloqueo en avisos más nuevos que apuntaban a esa orden. */
 export async function limpiarAntecesorAlCerrarOrden(workOrderId: string): Promise<void> {
   const db = getAdminDb();
   const snap = await db
@@ -241,6 +257,16 @@ export async function limpiarAntecesorAlCerrarOrden(workOrderId: string): Promis
       await commitIfNeeded();
     }
     if (n > 0) await batch.commit();
+
+    for (const d of snap.docs) {
+      const data = d.data() as Aviso;
+      await quitarOrdenPreviaPendienteEnProgramaPorAviso({
+        id: d.id,
+        n_aviso: data.n_aviso ?? d.id,
+        centro: data.centro ?? "",
+        incluido_en_semana: data.incluido_en_semana,
+      });
+    }
   }
 
   await db

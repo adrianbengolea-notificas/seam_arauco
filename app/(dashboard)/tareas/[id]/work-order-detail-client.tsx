@@ -806,13 +806,22 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
           className="rounded-xl border border-red-400/70 bg-red-50 px-4 py-3 text-sm text-red-950 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-100"
           role="alert"
         >
-          <p>
-            <span className="font-semibold">Esta orden sigue en proceso</span> y es la que debe cerrarse: llegó un aviso
-            SAP nuevo para el mismo mantenimiento (n.º{" "}
-            <span className="font-mono">{workOrder.alerta_cerrar_para_aviso_sap.n_aviso}</span>
-            ). <strong>Recomendamos terminarla</strong> (cierre con doble firma) antes de trabajar con el número nuevo;
-            el sistema las mantiene vinculadas para no perder el seguimiento.
-          </p>
+          {puedeCorregirFechaRealizacion ? (
+            <p>
+              <span className="font-semibold">Quedó pendiente cerrar el aviso SAP vinculado</span> (n.º{" "}
+              <span className="font-mono">{workOrder.alerta_cerrar_para_aviso_sap.n_aviso}</span>
+              ). La orden ya figura cerrada; usá <strong>Corregir fecha de realización</strong> con la misma fecha (si
+              corresponde) y un motivo de al menos 10 caracteres para completar el cierre en el sistema.
+            </p>
+          ) : (
+            <p>
+              <span className="font-semibold">Esta orden sigue en proceso</span> y es la que debe cerrarse: llegó un aviso
+              SAP nuevo para el mismo mantenimiento (n.º{" "}
+              <span className="font-mono">{workOrder.alerta_cerrar_para_aviso_sap.n_aviso}</span>
+              ). <strong>Recomendamos terminarla</strong> (cierre con doble firma) antes de trabajar con el número nuevo;
+              el sistema las mantiene vinculadas para no perder el seguimiento.
+            </p>
+          )}
           <p className="mt-2">
             <Link
               href={nuevaOtHref}

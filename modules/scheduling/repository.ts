@@ -517,6 +517,60 @@ export async function clearWorkOrderIdEnProgramaSemanaAdmin(input: {
   });
 }
 
+/**
+ * Quita la señal `ordenPreviaPendiente` del aviso en la grilla publicada (p. ej. al archivar la OT anterior).
+ */
+export async function clearOrdenPreviaPendienteEnProgramaSemanaAdmin(input: {
+  programaDocId: string;
+  avisoNumero?: string;
+  avisoFirestoreId?: string;
+}): Promise<boolean> {
+  const programaDocId = input.programaDocId.trim();
+  const avisoId = input.avisoFirestoreId?.trim();
+  const avisoNumero = input.avisoNumero?.trim();
+  if (!programaDocId || (!avisoId && !avisoNumero)) return false;
+
+  const ref = getAdminDb().collection(COLLECTIONS.programa_semanal).doc(programaDocId);
+  return getAdminDb().runTransaction(async (txn) => {
+    const snap = await txn.get(ref);
+    if (!snap.exists) return false;
+    const raw = snap.data() as Record<string, unknown>;
+    const slots = cloneSlotsShallow(((raw.slots as SlotSemanal[]) ?? []) as SlotSemanal[]);
+    let changed = false;
+
+    for (let si = 0; si < slots.length; si++) {
+      const cur = slots[si]!;
+      const avisos = [...(cur.avisos ?? [])];
+      let slotChanged = false;
+      for (let ai = 0; ai < avisos.length; ai++) {
+        const a = avisos[ai]!;
+        if (avisoId) {
+          const fid = a.avisoFirestoreId?.trim();
+          if (fid && fid !== avisoId) continue;
+          if (!fid && avisoNumero && a.numero !== avisoNumero) continue;
+        } else if (avisoNumero && a.numero !== avisoNumero) {
+          continue;
+        }
+        if (!a.ordenPreviaPendiente) continue;
+        const { ordenPreviaPendiente: _drop, ...rest } = a;
+        avisos[ai] = rest;
+        slotChanged = true;
+      }
+      if (slotChanged) {
+        slots[si] = { ...cur, avisos };
+        changed = true;
+      }
+    }
+
+    if (!changed) return false;
+    txn.update(ref, {
+      slots,
+      updated_at: FieldValue.serverTimestamp(),
+    } as Record<string, unknown>);
+    return true;
+  });
+}
+
 function normLocalidadPrograma(loc: string | undefined): string {
   return (loc?.trim() || "").trim() || "—";
 }

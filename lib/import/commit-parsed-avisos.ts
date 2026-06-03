@@ -244,12 +244,17 @@ function especialidadConPreferenciaCatalogoGg(
 /**
  * Import preventivos “Abril–Marzo” y similares solo traen A/E: no deben pisar un `GG` ya
  * fijado (p. ej. por listado semestral / PtoTrbRes SSGG-02) cuando el orden de import es fijo.
+ * Si el activo del catálogo tiene especialidad concreta (AA, ELECTRICO, HG), no conservar GG histórico erróneo.
  */
 function especialidadRespetandoGgEnFirestoreVariants(
   numero: string,
   espCalculada: Especialidad,
   existentePorId: Map<string, Especialidad>,
+  especialidadPredeterminadaActivo?: Especialidad,
 ): Especialidad {
+  if (especialidadPredeterminadaActivo && especialidadPredeterminadaActivo !== "GG") {
+    return espCalculada;
+  }
   let sawGg = false;
   for (const id of candidateAvisoDocIds(numero)) {
     if (existentePorId.get(id) === "GG") sawGg = true;
@@ -576,7 +581,13 @@ export async function commitParsedAvisoRows(input: {
       esp = especialidadConPreferenciaCatalogoGg(assetId, esp, especialidadPredeterminadaByAssetId);
     }
 
-    esp = especialidadRespetandoGgEnFirestoreVariants(numero, esp, existenteEspecialidadPorId);
+    const assetPred = assetId ? especialidadPredeterminadaByAssetId.get(assetId) : undefined;
+    esp = especialidadRespetandoGgEnFirestoreVariants(
+      numero,
+      esp,
+      existenteEspecialidadPorId,
+      assetPred,
+    );
 
     if (!assetId) {
       sinActivoUt++;

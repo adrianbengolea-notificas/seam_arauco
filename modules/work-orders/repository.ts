@@ -76,12 +76,26 @@ export async function listComentarioDocsAdmin(workOrderId: string): Promise<Quer
   return snap.docs;
 }
 
+function historialPayloadSinUndefined(
+  payload: WorkOrderHistorialEvent["payload"],
+): WorkOrderHistorialEvent["payload"] {
+  if (payload == null || typeof payload !== "object" || Array.isArray(payload)) {
+    return payload;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(payload)) {
+    if (v !== undefined) out[k] = v;
+  }
+  return out as WorkOrderHistorialEvent["payload"];
+}
+
 export async function appendHistorialAdmin(
   workOrderId: string,
   event: Omit<WorkOrderHistorialEvent, "id" | "created_at">,
 ): Promise<string> {
   const ref = await woRef(workOrderId).collection(WORK_ORDER_SUB.historial).add({
     ...event,
+    ...(event.payload != null ? { payload: historialPayloadSinUndefined(event.payload) } : {}),
     created_at: FieldValue.serverTimestamp(),
   });
   return ref.id;

@@ -5,34 +5,28 @@ import { AppError } from "@/lib/errors/app-error";
 import { requirePermisoFromToken } from "@/lib/permisos/server";
 import { getAdminDb } from "@/firebase/firebaseAdmin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import {
+  META_CORRECTIVOS_REPORTE,
+  META_CRITERIOS_REPORTE,
+  calcularTotalesPreventivo,
+  emptyDiscMap,
+  esDisciplina,
+  esOtCerradaEnPeriodo,
+  finalizarDiscMap,
+  mergeDiscMap,
+  normalizarEsp,
+  sitioDesdeUt,
+  type DisciplinaLabel,
+  type DisciplinaMetrica,
+  type SitioLabel,
+} from "@/lib/reportes/cumplimiento-metrics";
 import { Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 
-// ─── Tipos públicos ───────────────────────────────────────────────────────────
+export type { DisciplinaLabel, DisciplinaMetrica, SitioLabel };
+export { META_CORRECTIVOS_REPORTE, META_CRITERIOS_REPORTE };
 
-export type SitioLabel =
-  | "Esperanza"
-  | "Bossetti"
-  | "Yporá"
-  | "Piray"
-  | "Garita"
-  | "Otro";
-
-export type DisciplinaLabel = "AA" | "ELECTRICO" | "GG";
-
-export type SitioMetrica = {
-  sitio: SitioLabel;
-  planificadas: number;
-  ejecutadas: number;
-  pct: number;
-};
-
-export type DisciplinaMetrica = {
-  planificadas: number;
-  ejecutadas: number;
-  pct: number;
-  por_sitio: SitioMetrica[];
-};
+export type SitioMetrica = DisciplinaMetrica["por_sitio"][number];
 
 export type CorrectivoFila = {
   n_ot: string;
@@ -66,38 +60,30 @@ export type CorrectivosPorEspecialidad = {
   AA: number;
   ELECTRICO: number;
   GG: number;
-  /** Especialidad no reconocida o vacía */
   otro: number;
 };
 
 export type CentroResumen = {
   centro: string;
   disciplinas: Record<DisciplinaLabel, DisciplinaMetrica>;
-  correctivos: {
-    planificados: number;
-    no_planificados: number;
-    total: number;
-    pct_cumplimiento: number;
-    por_especialidad: CorrectivosPorEspecialidad;
-  };
-  totales: {
-    preventivos_planificados: number;
-    preventivos_ejecutados: number;
-    pct_general: number;
-    pct_certificacion: number;
-  };
+  correctivos: ReporteCumplimientoData["correctivos"];
+  totales: ReporteCumplimientoData["totales"];
 };
 
 export type ReporteCumplimientoData = {
   periodo: { mes: number; año: number; label: string };
   centro: string;
+  meta: typeof META_CRITERIOS_REPORTE;
+  meta_correctivos: typeof META_CORRECTIVOS_REPORTE;
   disciplinas: Record<DisciplinaLabel, DisciplinaMetrica>;
   correctivos: {
     planificados: number;
     no_planificados: number;
     total: number;
+    realizados: number;
+    pendientes: number;
+    /** Legacy: cerrados / total — no es KPI de certificación preventiva */
     pct_cumplimiento: number;
-    /** Distribución de correctivos del período por especialidad (AA / Eléctrico / GG). */
     por_especialidad: CorrectivosPorEspecialidad;
     detalle: CorrectivoFila[];
   };
@@ -105,43 +91,17 @@ export type ReporteCumplimientoData = {
   totales: {
     preventivos_planificados: number;
     preventivos_ejecutados: number;
+    preventivos_pendientes: number;
     pct_general: number;
-    /** Índice de certificación ponderado: AA×50% + Eléctrico×40% + GG×10% */
     pct_certificacion: number;
   };
-  /** Presente solo cuando centro = "todas" */
   por_centro?: CentroResumen[];
 };
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const MESES_ES = [
   "", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
 ];
-
-function sitioDesdeUt(ut: string | undefined): SitioLabel {
-  if (!ut) return "Otro";
-  const prefix = ut.split("-")[0]?.toUpperCase() ?? "";
-  if (prefix === "ESPE" || prefix === "ESP") return "Esperanza";
-  if (prefix === "BOSS" || prefix === "BOS") return "Bossetti";
-  if (prefix === "YPOR" || prefix === "YPO") return "Yporá";
-  if (prefix === "PIRA" || prefix === "PIR") return "Piray";
-  if (prefix === "GARI" || prefix === "GAR") return "Garita";
-  return "Otro";
-}
-
-function normalizarEsp(esp: string): DisciplinaLabel | string {
-  const u = esp?.toUpperCase() ?? "";
-  if (u === "AA") return "AA";
-  if (u === "ELECTRICO" || u === "ELÉCTRICO" || u === "HG") return "ELECTRICO";
-  if (u === "GG" || u === "GENERADOR") return "GG";
-  return esp;
-}
-
-function esDisciplina(esp: string): esp is DisciplinaLabel {
-  return esp === "AA" || esp === "ELECTRICO" || esp === "GG";
-}
 
 function tsToDateStr(ts: FirebaseFirestore.Timestamp | null | undefined): string | null {
   if (!ts) return null;
@@ -164,17 +124,11 @@ function emptyPorEspecialidadCorrectivos(): CorrectivosPorEspecialidad {
   return { AA: 0, ELECTRICO: 0, GG: 0, otro: 0 };
 }
 
-function emptyDisciplina(): DisciplinaMetrica {
-  const sitios: SitioLabel[] = ["Esperanza", "Bossetti", "Yporá", "Piray", "Garita", "Otro"];
-  return {
-    planificadas: 0,
-    ejecutadas: 0,
-    pct: 0,
-    por_sitio: sitios.map((s) => ({ sitio: s, planificadas: 0, ejecutadas: 0, pct: 0 })),
-  };
+function esPreventivoPuro(tipo: unknown): boolean {
+  return tipo === "PREVENTIVO";
 }
 
-// ─── Core query por un centro ─────────────────────────────────────────────────
+const TIPOS_CORRECTIVO_REPORTE = ["CORRECTIVO", "EMERGENCIA", "URGENTE"] as const;
 
 async function calcularCentro(
   db: FirebaseFirestore.Firestore,
@@ -187,43 +141,46 @@ async function calcularCentro(
   correctivos: ReporteCumplimientoData["correctivos"];
   otsDetalle: OTFilaDetalle[];
 }> {
-  const [prevPlanSnap, prevEjecSnap, corrSnap] = await Promise.all([
-    db.collection(COLLECTIONS.work_orders)
+  const [prevSnap, corrCerradosSnap, corrCreadosSnap] = await Promise.all([
+    db
+      .collection(COLLECTIONS.work_orders)
       .where("centro", "==", centro)
-      .where("tipo_trabajo", "in", ["PREVENTIVO", "CORRECTIVO_PREVENTIVO"])
-      .where("created_at", ">=", inicio)
-      .where("created_at", "<", fin)
+      .where("fecha_inicio_programada", ">=", inicio)
+      .where("fecha_inicio_programada", "<", fin)
       .get(),
-    db.collection(COLLECTIONS.work_orders)
+    db
+      .collection(COLLECTIONS.work_orders)
       .where("centro", "==", centro)
-      .where("tipo_trabajo", "in", ["PREVENTIVO", "CORRECTIVO_PREVENTIVO"])
+      .where("tipo_trabajo", "in", [...TIPOS_CORRECTIVO_REPORTE])
       .where("estado", "==", "CERRADA")
       .where("fecha_fin_ejecucion", ">=", inicio)
       .where("fecha_fin_ejecucion", "<", fin)
       .get(),
-    db.collection(COLLECTIONS.work_orders)
+    db
+      .collection(COLLECTIONS.work_orders)
       .where("centro", "==", centro)
-      .where("tipo_trabajo", "in", ["CORRECTIVO", "EMERGENCIA", "URGENTE"])
+      .where("tipo_trabajo", "in", [...TIPOS_CORRECTIVO_REPORTE])
       .where("created_at", ">=", inicio)
       .where("created_at", "<", fin)
       .get(),
   ]);
 
-  const discMap: Record<DisciplinaLabel, DisciplinaMetrica> = {
-    AA: emptyDisciplina(),
-    ELECTRICO: emptyDisciplina(),
-    GG: emptyDisciplina(),
-  };
-
-  const ejecIds = new Set(prevEjecSnap.docs.map((d: FirebaseFirestore.QueryDocumentSnapshot) => d.id));
+  const discMap = emptyDiscMap();
   const otsDetalle: OTFilaDetalle[] = [];
+  const inicioMs = inicio.toMillis();
+  const finMs = fin.toMillis();
 
-  for (const doc of prevPlanSnap.docs) {
+  for (const doc of prevSnap.docs) {
     const d = doc.data() as Record<string, unknown>;
     if (d.archivada === true) continue;
+    if (!esPreventivoPuro(d.tipo_trabajo)) continue;
+
     const esp = normalizarEsp(String(d.especialidad ?? ""));
     const sitio = sitioDesdeUt(d.ubicacion_tecnica as string | undefined);
-    const ejecutada = ejecIds.has(doc.id);
+    const ejecutada = esOtCerradaEnPeriodo(d.estado, d.fecha_fin_ejecucion, inicioMs, finMs);
+    const fechaCierreStr = tsToDateStr(
+      d.fecha_fin_ejecucion as FirebaseFirestore.Timestamp | null,
+    );
 
     if (esDisciplina(esp)) {
       discMap[esp].planificadas++;
@@ -249,95 +206,79 @@ async function calcularCentro(
         tipo: "preventivo",
         planificada: true,
         ejecutada,
-        fecha_ejecucion: ejecutada
-          ? tsToDateStr(d.fecha_fin_ejecucion as FirebaseFirestore.Timestamp | null)
-          : null,
+        fecha_ejecucion: fechaCierreStr,
         fecha_creacion: tsToDateStr(d.created_at as FirebaseFirestore.Timestamp) ?? "",
       });
     }
   }
 
-  for (const doc of prevEjecSnap.docs) {
-    if (prevPlanSnap.docs.some((p: FirebaseFirestore.QueryDocumentSnapshot) => p.id === doc.id)) continue;
-    const d = doc.data() as Record<string, unknown>;
-    if (d.archivada === true) continue;
-    const esp = normalizarEsp(String(d.especialidad ?? ""));
-    const sitio = sitioDesdeUt(d.ubicacion_tecnica as string | undefined);
-
-    if (esDisciplina(esp)) {
-      discMap[esp].ejecutadas++;
-      const sp = discMap[esp].por_sitio.find((s) => s.sitio === sitio);
-      if (sp) sp.ejecutadas++;
-    }
-
-    if (incluirDetalle) {
-      otsDetalle.push({
-        n_ot: String(d.n_ot ?? ""),
-        aviso_numero: String(d.aviso_numero ?? ""),
-        descripcion: String(d.texto_trabajo ?? ""),
-        especialidad: esp,
-        frecuencia: String(d.frecuencia_plan_mtsa ?? d.frecuencia ?? ""),
-        ubicacion: String(d.ubicacion_tecnica ?? ""),
-        sitio,
-        estado: String(d.estado ?? ""),
-        tipo: "preventivo",
-        planificada: false,
-        ejecutada: true,
-        fecha_ejecucion: tsToDateStr(d.fecha_fin_ejecucion as FirebaseFirestore.Timestamp | null),
-        fecha_creacion: tsToDateStr(d.created_at as FirebaseFirestore.Timestamp) ?? "",
-      });
-    }
-  }
-
-  for (const disc of Object.values(discMap)) {
-    disc.pct = disc.planificadas > 0
-      ? Math.round((disc.ejecutadas / disc.planificadas) * 100) / 100
-      : 0;
-    for (const sp of disc.por_sitio) {
-      sp.pct = sp.planificadas > 0
-        ? Math.round((sp.ejecutadas / sp.planificadas) * 100) / 100
-        : 0;
-    }
-  }
+  finalizarDiscMap(discMap);
 
   const corrDetalle: CorrectivoFila[] = [];
+  const corrDetalleIds = new Set<string>();
   let corrPlan = 0;
   let corrNoPlan = 0;
+  let corrRealizados = 0;
+  let corrPendientes = 0;
   const porEspCorr = emptyPorEspecialidadCorrectivos();
 
-  for (const doc of corrSnap.docs) {
+  const pushCorrDetalle = (
+    docId: string,
+    d: Record<string, unknown>,
+    ejecutado: boolean,
+    esp: DisciplinaLabel | string,
+    sitio: ReturnType<typeof sitioDesdeUt>,
+    tienAviso: boolean,
+  ) => {
+    if (tienAviso) corrPlan++;
+    else corrNoPlan++;
+    if (!incluirDetalle || corrDetalleIds.has(docId)) return;
+    corrDetalleIds.add(docId);
+    corrDetalle.push({
+      n_ot: String(d.n_ot ?? ""),
+      aviso_numero: String(d.aviso_numero ?? ""),
+      descripcion: String(d.texto_trabajo ?? ""),
+      especialidad: esDisciplina(esp) ? esp : (String(d.especialidad ?? "").trim() || "—"),
+      ubicacion: String(d.ubicacion_tecnica ?? ""),
+      sitio,
+      planificado: tienAviso,
+      ejecutado,
+      fecha:
+        tsToDateStr(d.fecha_fin_ejecucion as FirebaseFirestore.Timestamp | null)
+        ?? tsToDateStr(d.created_at as FirebaseFirestore.Timestamp | null),
+    });
+  };
+
+  for (const doc of corrCerradosSnap.docs) {
     const d = doc.data() as Record<string, unknown>;
     if (d.archivada === true) continue;
-    const tienAviso = Boolean(d.aviso_id || d.aviso_numero);
-    const ejecutado = d.estado === "CERRADA";
     const sitio = sitioDesdeUt(d.ubicacion_tecnica as string | undefined);
     const esp = normalizarEsp(String(d.especialidad ?? ""));
+    const tienAviso = Boolean(d.aviso_id || d.aviso_numero);
+
+    corrRealizados++;
     if (esDisciplina(esp)) porEspCorr[esp]++;
     else porEspCorr.otro++;
-
-    if (tienAviso) corrPlan++; else corrNoPlan++;
-
-    if (incluirDetalle) {
-      corrDetalle.push({
-        n_ot: String(d.n_ot ?? ""),
-        aviso_numero: String(d.aviso_numero ?? ""),
-        descripcion: String(d.texto_trabajo ?? ""),
-        especialidad: esDisciplina(esp) ? esp : (String(d.especialidad ?? "").trim() || "—"),
-        ubicacion: String(d.ubicacion_tecnica ?? ""),
-        sitio,
-        planificado: tienAviso,
-        ejecutado,
-        fecha: tsToDateStr(d.fecha_fin_ejecucion as FirebaseFirestore.Timestamp | null)
-          ?? tsToDateStr(d.created_at as FirebaseFirestore.Timestamp | null),
-      });
-    }
+    pushCorrDetalle(doc.id, d, true, esp, sitio, tienAviso);
   }
 
-  const corrTotal = corrSnap.docs.filter(
-    (doc) => (doc.data() as { archivada?: boolean }).archivada !== true,
-  ).length;
-  const corrEjecutados = corrDetalle.filter((c) => c.ejecutado).length
-    + (!incluirDetalle ? 0 : 0);
+  for (const doc of corrCreadosSnap.docs) {
+    const d = doc.data() as Record<string, unknown>;
+    if (d.archivada === true) continue;
+    if (
+      esOtCerradaEnPeriodo(d.estado, d.fecha_fin_ejecucion, inicioMs, finMs)
+    ) {
+      continue;
+    }
+    const sitio = sitioDesdeUt(d.ubicacion_tecnica as string | undefined);
+    const esp = normalizarEsp(String(d.especialidad ?? ""));
+    const tienAviso = Boolean(d.aviso_id || d.aviso_numero);
+
+    corrPendientes++;
+    pushCorrDetalle(doc.id, d, false, esp, sitio, tienAviso);
+  }
+
+  const corrTotal = corrRealizados + corrPendientes;
 
   return {
     discMap,
@@ -345,9 +286,10 @@ async function calcularCentro(
       planificados: corrPlan,
       no_planificados: corrNoPlan,
       total: corrTotal,
-      pct_cumplimiento: corrTotal > 0
-        ? Math.round((corrEjecutados / corrTotal) * 100) / 100
-        : 0,
+      realizados: corrRealizados,
+      pendientes: corrPendientes,
+      pct_cumplimiento:
+        corrTotal > 0 ? Math.round((corrRealizados / corrTotal) * 100) / 100 : 0,
       por_especialidad: porEspCorr,
       detalle: corrDetalle,
     },
@@ -355,58 +297,12 @@ async function calcularCentro(
   };
 }
 
-function calcularTotales(discMap: Record<DisciplinaLabel, DisciplinaMetrica>) {
-  const totalPlan = discMap.AA.planificadas + discMap.ELECTRICO.planificadas + discMap.GG.planificadas;
-  const totalEjec = discMap.AA.ejecutadas + discMap.ELECTRICO.ejecutadas + discMap.GG.ejecutadas;
-  const pctAA   = discMap.AA.planificadas       > 0 ? discMap.AA.ejecutadas       / discMap.AA.planificadas       : 0;
-  const pctElec = discMap.ELECTRICO.planificadas > 0 ? discMap.ELECTRICO.ejecutadas / discMap.ELECTRICO.planificadas : 0;
-  const pctGG   = discMap.GG.planificadas       > 0 ? discMap.GG.ejecutadas       / discMap.GG.planificadas       : 0;
-  return {
-    preventivos_planificados: totalPlan,
-    preventivos_ejecutados: totalEjec,
-    pct_general: totalPlan > 0 ? Math.round((totalEjec / totalPlan) * 100) / 100 : 0,
-    pct_certificacion: Math.round((pctAA * 0.5 + pctElec * 0.4 + pctGG * 0.1) * 10000) / 10000,
-  };
-}
-
-function mergeDiscMap(
-  base: Record<DisciplinaLabel, DisciplinaMetrica>,
-  other: Record<DisciplinaLabel, DisciplinaMetrica>,
-): Record<DisciplinaLabel, DisciplinaMetrica> {
-  const discs: DisciplinaLabel[] = ["AA", "ELECTRICO", "GG"];
-  for (const disc of discs) {
-    base[disc].planificadas += other[disc].planificadas;
-    base[disc].ejecutadas += other[disc].ejecutadas;
-    for (const sp of base[disc].por_sitio) {
-      const otherSp = other[disc].por_sitio.find((s) => s.sitio === sp.sitio);
-      if (otherSp) {
-        sp.planificadas += otherSp.planificadas;
-        sp.ejecutadas += otherSp.ejecutadas;
-      }
-    }
-  }
-  // recalc pct
-  for (const disc of discs) {
-    base[disc].pct = base[disc].planificadas > 0
-      ? Math.round((base[disc].ejecutadas / base[disc].planificadas) * 100) / 100
-      : 0;
-    for (const sp of base[disc].por_sitio) {
-      sp.pct = sp.planificadas > 0 ? Math.round((sp.ejecutadas / sp.planificadas) * 100) / 100 : 0;
-    }
-  }
-  return base;
-}
-
-// ─── Schema validación ────────────────────────────────────────────────────────
-
 const InputSchema = z.object({
   centro: z.string().trim().min(1),
   mes: z.number().int().min(1).max(12),
   año: z.number().int().min(2020).max(2099),
   centros_lista: z.array(z.string()).optional(),
 });
-
-// ─── Server Action ────────────────────────────────────────────────────────────
 
 export async function actionGetReporteCumplimiento(
   token: string,
@@ -422,36 +318,31 @@ export async function actionGetReporteCumplimiento(
     const { centro, mes, año, centros_lista } = parsed.data;
     const { inicio, fin } = rangeMes(año, mes);
     const db = getAdminDb();
-
     const periodoLabel = `${MESES_ES[mes]} ${año}`;
 
-    // ─── Modo TODAS ─────────────────────────────────────────────────────────
     if (centro === "todas" && centros_lista && centros_lista.length > 0) {
       const resultados = await Promise.all(
         centros_lista.map((c) => calcularCentro(db, c, inicio, fin, true)),
       );
 
-      const aggDisc: Record<DisciplinaLabel, DisciplinaMetrica> = {
-        AA: emptyDisciplina(),
-        ELECTRICO: emptyDisciplina(),
-        GG: emptyDisciplina(),
-      };
+      const aggDisc = emptyDiscMap();
       let aggCorrPlan = 0;
       let aggCorrNoPlan = 0;
       let aggCorrTotal = 0;
+      let aggCorrRealizados = 0;
       const aggPorEspCorr = emptyPorEspecialidadCorrectivos();
       const aggOtsDetalle: OTFilaDetalle[] = [];
       const aggCorrDetalle: CorrectivoFila[] = [];
-
       const porCentro: CentroResumen[] = [];
 
       for (let i = 0; i < centros_lista.length; i++) {
-        const r = resultados[i];
-        const c = centros_lista[i];
+        const r = resultados[i]!;
+        const c = centros_lista[i]!;
         mergeDiscMap(aggDisc, r.discMap);
         aggCorrPlan += r.correctivos.planificados;
         aggCorrNoPlan += r.correctivos.no_planificados;
         aggCorrTotal += r.correctivos.total;
+        aggCorrRealizados += r.correctivos.realizados;
         aggPorEspCorr.AA += r.correctivos.por_especialidad.AA;
         aggPorEspCorr.ELECTRICO += r.correctivos.por_especialidad.ELECTRICO;
         aggPorEspCorr.GG += r.correctivos.por_especialidad.GG;
@@ -459,35 +350,32 @@ export async function actionGetReporteCumplimiento(
         aggOtsDetalle.push(...r.otsDetalle);
         aggCorrDetalle.push(...r.correctivos.detalle);
 
-        const cTotales = calcularTotales(r.discMap);
         porCentro.push({
           centro: c,
           disciplinas: r.discMap,
-          correctivos: {
-            planificados: r.correctivos.planificados,
-            no_planificados: r.correctivos.no_planificados,
-            total: r.correctivos.total,
-            pct_cumplimiento: r.correctivos.pct_cumplimiento,
-            por_especialidad: r.correctivos.por_especialidad,
-          },
-          totales: cTotales,
+          correctivos: r.correctivos,
+          totales: calcularTotalesPreventivo(r.discMap),
         });
       }
 
-      const aggEjecutados = aggCorrDetalle.filter((c) => c.ejecutado).length;
-      const totales = calcularTotales(aggDisc);
+      const totales = calcularTotalesPreventivo(aggDisc);
 
       return success({
         periodo: { mes, año, label: periodoLabel },
         centro: "todas",
+        meta: META_CRITERIOS_REPORTE,
+        meta_correctivos: META_CORRECTIVOS_REPORTE,
         disciplinas: aggDisc,
         correctivos: {
           planificados: aggCorrPlan,
           no_planificados: aggCorrNoPlan,
           total: aggCorrTotal,
-          pct_cumplimiento: aggCorrTotal > 0
-            ? Math.round((aggEjecutados / aggCorrTotal) * 100) / 100
-            : 0,
+          realizados: aggCorrRealizados,
+          pendientes: aggCorrTotal - aggCorrRealizados,
+          pct_cumplimiento:
+            aggCorrTotal > 0
+              ? Math.round((aggCorrRealizados / aggCorrTotal) * 100) / 100
+              : 0,
           por_especialidad: aggPorEspCorr,
           detalle: aggCorrDetalle,
         },
@@ -497,18 +385,23 @@ export async function actionGetReporteCumplimiento(
       });
     }
 
-    // ─── Modo centro único ───────────────────────────────────────────────────
     const { discMap, correctivos, otsDetalle } = await calcularCentro(
-      db, centro, inicio, fin, true,
+      db,
+      centro,
+      inicio,
+      fin,
+      true,
     );
 
     return success({
       periodo: { mes, año, label: periodoLabel },
       centro,
+      meta: META_CRITERIOS_REPORTE,
+      meta_correctivos: META_CORRECTIVOS_REPORTE,
       disciplinas: discMap,
       correctivos,
       ots_detalle: otsDetalle,
-      totales: calcularTotales(discMap),
+      totales: calcularTotalesPreventivo(discMap),
     });
   } catch (e) {
     if (e instanceof AppError) return failure(e);

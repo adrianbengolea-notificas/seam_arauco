@@ -2,15 +2,23 @@
 
 import {
   actionGetReporteCumplimiento,
-  type CentroResumen,
   type DisciplinaLabel,
-  type DisciplinaMetrica,
   type ReporteCumplimientoData,
-  type SitioLabel,
 } from "@/app/actions/reporte-cumplimiento";
+import {
+  DetalleCalculoPanel,
+  DisciplinaCard,
+  DISC_LABELS,
+  KpiPreventivoHero,
+  PorCentroTable,
+  pctBar,
+  ResumenSitioTable,
+  TablaEspecialidadPreventivo,
+} from "@/app/(dashboard)/reportes/cumplimiento/reporte-cumplimiento-ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DEFAULT_CENTRO, KNOWN_CENTROS, nombreCentro } from "@/lib/config/app-config";
+import { formulaPctText, SITIOS_REPORTE } from "@/lib/reportes/cumplimiento-metrics";
 import { getClientIdToken, useAuthUser, useUserProfile } from "@/modules/users/hooks";
 import { usePermisos } from "@/lib/permisos/usePermisos";
 import { Download, Loader2 } from "lucide-react";
@@ -25,18 +33,6 @@ const MESES = [
   { v: 7, l: "Julio" }, { v: 8, l: "Agosto" }, { v: 9, l: "Septiembre" },
   { v: 10, l: "Octubre" }, { v: 11, l: "Noviembre" }, { v: 12, l: "Diciembre" },
 ];
-
-const DISC_LABELS: Record<DisciplinaLabel, string> = {
-  AA: "Aire Acondicionado",
-  ELECTRICO: "Eléctrico",
-  GG: "Grupos Generadores",
-};
-
-const DISC_COLOR: Record<DisciplinaLabel, string> = {
-  AA: "text-blue-700 bg-blue-50 border-blue-200",
-  ELECTRICO: "text-amber-700 bg-amber-50 border-amber-200",
-  GG: "text-green-700 bg-green-50 border-green-200",
-};
 
 /** Colores hex para gráficos (recharts), alineados con las tarjetas por disciplina */
 const CORR_ESP_PIE_COLORS: Record<DisciplinaLabel | "otro", string> = {
@@ -58,121 +54,24 @@ const chartTooltip = {
   itemStyle: { fontSize: 12, color: "var(--muted-fg)" },
 };
 
-const SITIOS: SitioLabel[] = ["Esperanza", "Bossetti", "Yporá", "Piray", "Garita", "Otro"];
-
 /** Etiquetas de UI: en vista cliente se usa «especialidad» en lugar de «disciplina». */
 function terminoReporte(esCliente: boolean) {
   return {
     columna: esCliente ? "Especialidad" : "Disciplina",
-    porSitio: esCliente ? "por especialidad y sitio" : "por disciplina y sitio",
+    porSitio: esCliente ? "por especialidad y sitio (UT)" : "por disciplina y sitio (UT)",
     porCap: esCliente ? "Cumplimiento por especialidad" : "Cumplimiento por disciplina",
     resumenPor: esCliente
-      ? "Resumen ejecutadas / planificadas por especialidad y sitio"
-      : "Resumen ejecutadas / planificadas por disciplina y sitio",
+      ? "Desglose por sitio (ubicación técnica)"
+      : "Desglose por sitio (ubicación técnica)",
     exportNota: esCliente
-      ? "Resumen con colores por especialidad y semáforo de cumplimiento"
-      : "Resumen con colores por disciplina y semáforo de cumplimiento",
+      ? "KPI preventivo, especialidad y sitio"
+      : "KPI preventivo, disciplina y sitio",
   };
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function pctBadge(pct: number) {
-  const p = Math.round(pct * 100);
-  const cls =
-    p >= 90 ? "bg-green-100 text-green-800 border-green-200" :
-    p >= 70 ? "bg-amber-100 text-amber-800 border-amber-200" :
-    "bg-red-100 text-red-800 border-red-200";
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${cls}`}>
-      {p}%
-    </span>
-  );
-}
-
-function pctBar(pct: number) {
-  const p = Math.min(100, Math.round(pct * 100));
-  const color = p >= 90 ? "bg-green-500" : p >= 70 ? "bg-amber-500" : "bg-red-500";
-  return (
-    <div className="h-1.5 w-full rounded-full bg-muted">
-      <div className={`h-1.5 rounded-full transition-all ${color}`} style={{ width: `${p}%` }} />
-    </div>
-  );
 }
 
 function etiquetaEspecialidadCorrectivo(raw: string) {
   if (raw === "AA" || raw === "ELECTRICO" || raw === "GG") return DISC_LABELS[raw];
   return raw || "—";
-}
-
-// ─── Sub-componentes ──────────────────────────────────────────────────────────
-
-function DisciplinaCard({ label, disc }: { label: DisciplinaLabel; disc: DisciplinaMetrica }) {
-  const [expanded, setExpanded] = useState(false);
-  const pct = Math.round(disc.pct * 100);
-  const sitiosConDatos = disc.por_sitio.filter((s) => s.planificadas > 0 || s.ejecutadas > 0);
-
-  return (
-    <Card className={`border ${DISC_COLOR[label]}`}>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-semibold">{DISC_LABELS[label]}</CardTitle>
-          {pctBadge(disc.pct)}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {pctBar(disc.pct)}
-        <div className="grid grid-cols-3 gap-3 text-center">
-          <div>
-            <p className="text-xs text-muted-foreground">Planificadas</p>
-            <p className="text-xl font-bold">{disc.planificadas}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Ejecutadas</p>
-            <p className="text-xl font-bold">{disc.ejecutadas}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Cumplimiento</p>
-            <p className="text-xl font-bold">{pct}%</p>
-          </div>
-        </div>
-
-        {sitiosConDatos.length > 0 ? (
-          <>
-            <button
-              type="button"
-              className="text-xs text-muted-foreground underline underline-offset-2"
-              onClick={() => setExpanded((v) => !v)}
-            >
-              {expanded ? "Ocultar por sitio" : "Ver por sitio"}
-            </button>
-            {expanded ? (
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b text-muted-foreground">
-                    <th className="py-1 text-left font-medium">Sitio</th>
-                    <th className="py-1 text-right font-medium">Plan.</th>
-                    <th className="py-1 text-right font-medium">Ejec.</th>
-                    <th className="py-1 text-right font-medium">%</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {sitiosConDatos.map((s) => (
-                    <tr key={s.sitio}>
-                      <td className="py-1">{s.sitio}</td>
-                      <td className="py-1 text-right">{s.planificadas}</td>
-                      <td className="py-1 text-right">{s.ejecutadas}</td>
-                      <td className="py-1 text-right">{Math.round(s.pct * 100)}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : null}
-          </>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
 }
 
 function CorrectivoCard({ data }: { data: ReporteCumplimientoData["correctivos"] }) {
@@ -207,20 +106,37 @@ function CorrectivoCard({ data }: { data: ReporteCumplimientoData["correctivos"]
   return (
     <Card>
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-semibold">Correctivos</CardTitle>
-          {pctBadge(data.pct_cumplimiento)}
-        </div>
+        <CardTitle className="text-sm font-semibold">Correctivos del período</CardTitle>
         <CardDescription className="text-xs">
-          Total: {data.total} · Planificados: {data.planificados} · No planificados: {data.no_planificados}
+          Bloque aparte del KPI preventivo. Realizados = cierre (fecha_fin_ejecucion) en el mes.
+          Pendientes = creadas en el mes sin ese cierre.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
-        {pctBar(data.pct_cumplimiento)}
+        <div className="grid grid-cols-3 gap-3 text-center">
+          <div>
+            <p className="text-xs text-muted-foreground">Total</p>
+            <p className="text-xl font-bold tabular-nums">{data.total}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Realizados</p>
+            <p className="text-xl font-bold tabular-nums text-green-700">{data.realizados}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Pendientes</p>
+            <p className="text-xl font-bold tabular-nums text-amber-700">{data.pendientes}</p>
+          </div>
+        </div>
+        <p className="text-center font-mono text-xs text-muted-foreground">
+          {data.realizados} realizados + {data.pendientes} pendientes = {data.total} en el período
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Con aviso: {data.planificados} · Sin aviso: {data.no_planificados}
+        </p>
         {data.total > 0 && pieRows.length > 0 ? (
           <div className="border-t pt-3">
             <p className="text-xs font-medium text-muted-foreground">
-              Distribución por especialidad (AA · Eléctrico · GG)
+              Realizados por especialidad (solo cerrados en el mes)
             </p>
             <div className="h-[240px] w-full min-w-0">
               <ResponsiveContainer width="100%" height="100%">
@@ -316,140 +232,6 @@ function CorrectivoCard({ data }: { data: ReporteCumplimientoData["correctivos"]
   );
 }
 
-function ResumenTable({
-  data,
-  columnaEspLabel,
-}: {
-  data: ReporteCumplimientoData;
-  columnaEspLabel: string;
-}) {
-  const disciplinas: DisciplinaLabel[] = ["AA", "ELECTRICO", "GG"];
-  return (
-    <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full min-w-[560px] text-sm">
-        <thead className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
-          <tr>
-            <th className="px-4 py-2.5 text-left font-medium">{columnaEspLabel}</th>
-            {SITIOS.map((s) => (
-              <th key={s} className="px-3 py-2.5 text-right font-medium">{s}</th>
-            ))}
-            <th className="px-3 py-2.5 text-right font-medium">Total</th>
-            <th className="px-3 py-2.5 text-right font-medium">%</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y">
-          {disciplinas.map((disc) => {
-            const d = data.disciplinas[disc];
-            return (
-              <tr key={disc} className="hover:bg-muted/20">
-                <td className="px-4 py-2 font-medium">{DISC_LABELS[disc]}</td>
-                {SITIOS.map((s) => {
-                  const sp = d.por_sitio.find((x) => x.sitio === s);
-                  return (
-                    <td key={s} className="px-3 py-2 text-right text-xs">
-                      {sp && sp.planificadas > 0 ? (
-                        <span>
-                          <span className="font-medium text-foreground">{sp.ejecutadas}</span>
-                          <span className="text-muted-foreground">/{sp.planificadas}</span>
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </td>
-                  );
-                })}
-                <td className="px-3 py-2 text-right font-medium">
-                  {d.ejecutadas}/{d.planificadas}
-                </td>
-                <td className="px-3 py-2 text-right">{pctBadge(d.pct)}</td>
-              </tr>
-            );
-          })}
-          <tr className="border-t-2 bg-muted/30 font-semibold">
-            <td className="px-4 py-2">TOTAL PREVENTIVOS</td>
-            {SITIOS.map((s) => {
-              const totalPlan = disciplinas.reduce((acc, d) => {
-                const sp = data.disciplinas[d].por_sitio.find((x) => x.sitio === s);
-                return acc + (sp?.planificadas ?? 0);
-              }, 0);
-              const totalEjec = disciplinas.reduce((acc, d) => {
-                const sp = data.disciplinas[d].por_sitio.find((x) => x.sitio === s);
-                return acc + (sp?.ejecutadas ?? 0);
-              }, 0);
-              return (
-                <td key={s} className="px-3 py-2 text-right text-xs">
-                  {totalPlan > 0 ? (
-                    <span>
-                      <span className="font-medium text-foreground">{totalEjec}</span>
-                      <span className="text-muted-foreground">/{totalPlan}</span>
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </td>
-              );
-            })}
-            <td className="px-3 py-2 text-right">
-              {data.totales.preventivos_ejecutados}/{data.totales.preventivos_planificados}
-            </td>
-            <td className="px-3 py-2 text-right">{pctBadge(data.totales.pct_general)}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-/** Tabla comparativa de todos los centros */
-function PorCentroTable({ centros }: { centros: CentroResumen[] }) {
-  const disciplinas: DisciplinaLabel[] = ["AA", "ELECTRICO", "GG"];
-  return (
-    <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full text-sm">
-        <thead className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
-          <tr>
-            <th className="px-4 py-2.5 text-left font-medium">Centro</th>
-            {disciplinas.map((d) => (
-              <th key={d} className="px-3 py-2.5 text-right font-medium">{DISC_LABELS[d]}</th>
-            ))}
-            <th className="px-3 py-2.5 text-right font-medium">Preventivos</th>
-            <th className="px-3 py-2.5 text-right font-medium">Correctivos</th>
-            <th className="px-3 py-2.5 text-right font-medium">Índice certif.</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y">
-          {centros.map((c) => (
-            <tr key={c.centro} className="hover:bg-muted/20">
-              <td className="px-4 py-2 font-medium">
-                <span className="text-xs">{nombreCentro(c.centro)}</span>
-              </td>
-              {disciplinas.map((d) => (
-                <td key={d} className="px-3 py-2 text-right text-xs">
-                  {c.disciplinas[d].planificadas > 0 ? (
-                    <span className="space-x-1">
-                      <span className="font-medium">{c.disciplinas[d].ejecutadas}</span>
-                      <span className="text-muted-foreground">/{c.disciplinas[d].planificadas}</span>
-                      <span>{pctBadge(c.disciplinas[d].pct)}</span>
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </td>
-              ))}
-              <td className="px-3 py-2 text-right text-xs">
-                {c.totales.preventivos_ejecutados}/{c.totales.preventivos_planificados}{" "}
-                {pctBadge(c.totales.pct_general)}
-              </td>
-              <td className="px-3 py-2 text-right text-xs">{c.correctivos.total}</td>
-              <td className="px-3 py-2 text-right">{pctBadge(c.totales.pct_certificacion)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 // ─── Excel export con colores (exceljs) ───────────────────────────────────────
 
 async function exportarExcel(
@@ -536,9 +318,8 @@ async function exportarExcel(
 
   // ── Hoja 1: Resumen ───────────────────────────────────────────────────────
   const ws1 = wb.addWorksheet("Resumen");
-  const numCols = 2 + SITIOS.length + 3; // disciplina + sitios + total plan + total ejec + %
+  const numCols = 2 + SITIOS_REPORTE.length + 4;
 
-  // Título
   ws1.mergeCells(1, 1, 1, numCols);
   const titleCell = ws1.getCell(1, 1);
   titleCell.value = `REPORTE DE CUMPLIMIENTO — ${data.periodo.label.toUpperCase()} — ${centroLabel}`;
@@ -547,21 +328,46 @@ async function exportarExcel(
   titleCell.alignment = { horizontal: "center", vertical: "middle" };
   ws1.getRow(1).height = 30;
 
-  // Subtítulo: Índice de certificación
   ws1.mergeCells(2, 1, 2, numCols);
-  const certCell = ws1.getCell(2, 1);
-  const pctCert = Math.round(data.totales.pct_certificacion * 100);
-  certCell.value = `ÍNDICE DE CERTIFICACIÓN: ${pctCert}%   (AA×50% + Eléctrico×40% + GG×10%)`;
-  certCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: pctCert >= 90 ? C.pctGreenBg : pctCert >= 70 ? C.pctAmberBg : C.pctRedBg } };
-  certCell.font = { bold: true, color: { argb: pctFontColor(data.totales.pct_certificacion) }, name: "Calibri", size: 12 };
-  certCell.alignment = { horizontal: "center", vertical: "middle" };
+  const kpiCell = ws1.getCell(2, 1);
+  const pctPrev = Math.round(data.totales.pct_general * 100);
+  kpiCell.value = `CUMPLIMIENTO PREVENTIVO (KPI): ${pctPrev}% — ${formulaPctText(
+    data.totales.preventivos_ejecutados,
+    data.totales.preventivos_planificados,
+  )} · Pendientes: ${data.totales.preventivos_pendientes}`;
+  kpiCell.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: pctPrev >= 90 ? C.pctGreenBg : pctPrev >= 70 ? C.pctAmberBg : C.pctRedBg },
+  };
+  kpiCell.font = {
+    bold: true,
+    color: { argb: pctFontColor(data.totales.pct_general) },
+    name: "Calibri",
+    size: 12,
+  };
+  kpiCell.alignment = { horizontal: "center", vertical: "middle" };
   ws1.getRow(2).height = 22;
+
+  ws1.mergeCells(3, 1, 3, numCols);
+  const certCell = ws1.getCell(3, 1);
+  const pctCert = Math.round(data.totales.pct_certificacion * 100);
+  certCell.value = `Índice de certificación (contrato): ${pctCert}% (AA×50% + Eléctrico×40% + GG×10%)`;
+  certCell.font = { italic: true, name: "Calibri", size: 10 };
+  certCell.alignment = { horizontal: "center", vertical: "middle" };
 
   // Fila vacía
   ws1.addRow([]);
 
   // Headers tabla preventivos
-  const headers = [columnaEsp, ...SITIOS, "Total Plan.", "Total Ejec.", "% Cumplimiento"];
+  const headers = [
+    columnaEsp,
+    ...SITIOS_REPORTE,
+    "Programados",
+    "Ejecutados",
+    "Pendientes",
+    "% Cumplimiento",
+  ];
   const hRow = ws1.addRow(headers);
   applyHeaderStyle(hRow, C.headerBg);
   ws1.getRow(hRow.number).height = 18;
@@ -575,7 +381,7 @@ async function exportarExcel(
 
   for (const disc of disciplinas) {
     const d = data.disciplinas[disc];
-    const sitioVals = SITIOS.map((s) => {
+    const sitioVals = SITIOS_REPORTE.map((s) => {
       const sp = d.por_sitio.find((x) => x.sitio === s);
       return sp && sp.planificadas > 0 ? `${sp.ejecutadas}/${sp.planificadas}` : "—";
     });
@@ -584,6 +390,7 @@ async function exportarExcel(
       ...sitioVals,
       d.planificadas,
       d.ejecutadas,
+      d.pendientes,
       `${Math.round(d.pct * 100)}%`,
     ]);
     applyRowStyle(row, discColors[disc].bg, discColors[disc].fg);
@@ -597,13 +404,14 @@ async function exportarExcel(
   // Fila totales preventivos
   const totRow = ws1.addRow([
     "TOTAL PREVENTIVOS",
-    ...SITIOS.map((s) => {
+    ...SITIOS_REPORTE.map((s) => {
       const p = disciplinas.reduce((a, d) => a + (data.disciplinas[d].por_sitio.find((x) => x.sitio === s)?.planificadas ?? 0), 0);
       const e = disciplinas.reduce((a, d) => a + (data.disciplinas[d].por_sitio.find((x) => x.sitio === s)?.ejecutadas ?? 0), 0);
       return p > 0 ? `${e}/${p}` : "—";
     }),
     data.totales.preventivos_planificados,
     data.totales.preventivos_ejecutados,
+    data.totales.preventivos_pendientes,
     `${Math.round(data.totales.pct_general * 100)}%`,
   ]);
   applyRowStyle(totRow, C.grayBg);
@@ -637,19 +445,22 @@ async function exportarExcel(
   const corrHRow = ws1.addRow(["CORRECTIVOS DEL PERÍODO", "", "", "", "", "", "", "", "", data.correctivos.total.toString()]);
   applyHeaderStyle(corrHRow, C.headerBg);
 
-  ws1.addRow([`  Con aviso (planificados)`, "", "", "", "", "", "", "", "", data.correctivos.planificados.toString()]);
-  ws1.addRow([`  Sin aviso (no planificados)`, "", "", "", "", "", "", "", "", data.correctivos.no_planificados.toString()]);
-  const corrPctRow = ws1.addRow([`  % Cumplimiento`, "", "", "", "", "", "", "", "", `${Math.round(data.correctivos.pct_cumplimiento * 100)}%`]);
+  ws1.addRow([`  Realizados (fecha cierre en mes)`, "", "", "", "", "", "", "", "", data.correctivos.realizados.toString()]);
+  ws1.addRow([`  Pendientes (creadas en mes, sin cierre en mes)`, "", "", "", "", "", "", "", "", data.correctivos.pendientes.toString()]);
+  ws1.addRow([`  Con aviso`, "", "", "", "", "", "", "", "", data.correctivos.planificados.toString()]);
+  ws1.addRow([`  Sin aviso`, "", "", "", "", "", "", "", "", data.correctivos.no_planificados.toString()]);
+  const corrPctRow = ws1.addRow([`  % cerrados`, "", "", "", "", "", "", "", "", `${Math.round(data.correctivos.pct_cumplimiento * 100)}%`]);
   const corrPct = corrPctRow.getCell(numCols);
   corrPct.fill = { type: "pattern", pattern: "solid", fgColor: pctFill(data.correctivos.pct_cumplimiento).fgColor };
   corrPct.font = { bold: true, color: { argb: pctFontColor(data.correctivos.pct_cumplimiento) }, name: "Calibri", size: 10 };
 
   // Anchos columnas
   ws1.getColumn(1).width = 30;
-  for (let i = 2; i <= 1 + SITIOS.length; i++) ws1.getColumn(i).width = 14;
-  ws1.getColumn(2 + SITIOS.length).width = 14;
-  ws1.getColumn(3 + SITIOS.length).width = 14;
-  ws1.getColumn(4 + SITIOS.length).width = 16;
+  for (let i = 2; i <= 1 + SITIOS_REPORTE.length; i++) ws1.getColumn(i).width = 14;
+  ws1.getColumn(2 + SITIOS_REPORTE.length).width = 14;
+  ws1.getColumn(3 + SITIOS_REPORTE.length).width = 14;
+  ws1.getColumn(4 + SITIOS_REPORTE.length).width = 14;
+  ws1.getColumn(5 + SITIOS_REPORTE.length).width = 16;
 
   // ── Hoja 2: Por centro (solo modo "todas") ────────────────────────────────
   if (data.por_centro && data.por_centro.length > 0) {
@@ -688,7 +499,7 @@ async function exportarExcel(
         `${Math.round(cr.disciplinas.GG.pct * 100)}%`,
         `${cr.totales.preventivos_ejecutados}/${cr.totales.preventivos_planificados}`,
         `${Math.round(cr.totales.pct_general * 100)}%`,
-        cr.correctivos.total,
+        `${cr.correctivos.realizados}/${cr.correctivos.total}`,
         `${Math.round(cr.totales.pct_certificacion * 100)}%`,
       ]);
       applyRowStyle(row, C.white);
@@ -883,8 +694,8 @@ export function ReporteCumplimientoClient() {
         <p className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground">Reportes</p>
         <h1 className="mt-1 text-2xl font-bold tracking-tight">Reporte de cumplimiento</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          OTs preventivas planificadas vs ejecutadas {term.porSitio}. Correctivos del período.
-          Exportable a Excel para la certificación mensual.
+          KPI principal: preventivos programados en el mes (fecha programada) vs ejecutados (cerrados).
+          Correctivos en bloque aparte. Exportable a Excel.
         </p>
       </div>
 
@@ -976,68 +787,41 @@ export function ReporteCumplimientoClient() {
 
       {data ? (
         <div className="space-y-6">
-          {/* KPI global */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Card className="border-2 border-emerald-400/50 bg-emerald-50/60 dark:bg-emerald-950/20 sm:col-span-2 lg:col-span-1">
-              <CardContent className="pt-5 text-center">
-                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
-                  Índice de certificación
+          <div className="grid gap-4 lg:grid-cols-3">
+            <KpiPreventivoHero data={data} />
+            <Card className="border border-emerald-400/40 bg-emerald-50/40 dark:bg-emerald-950/20">
+              <CardContent className="space-y-2 pt-5 text-center">
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-400">
+                  Índice de certificación (contrato)
                 </p>
-                <p className="mt-1 text-4xl font-bold text-emerald-700 dark:text-emerald-400">
+                <p className="text-3xl font-bold text-emerald-800 dark:text-emerald-400">
                   {Math.round(data.totales.pct_certificacion * 100)}%
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  AA×50% + Eléc×40% + GG×10%
-                </p>
-                <div className="mt-2 grid grid-cols-3 gap-1 text-[0.65rem] text-muted-foreground">
+                <p className="font-mono text-xs text-muted-foreground">AA×50% + Eléc×40% + GG×10%</p>
+                <div className="grid grid-cols-3 gap-1 text-[0.65rem] text-muted-foreground">
                   <span>AA {Math.round(data.disciplinas.AA.pct * 100)}%</span>
                   <span>Eléc {Math.round(data.disciplinas.ELECTRICO.pct * 100)}%</span>
                   <span>GG {Math.round(data.disciplinas.GG.pct * 100)}%</span>
                 </div>
               </CardContent>
             </Card>
-            <Card className="border-2 border-brand/30 bg-brand/5">
-              <CardContent className="pt-5 text-center">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Cumplimiento general
-                </p>
-                <p className="mt-1 text-4xl font-bold text-brand">
-                  {Math.round(data.totales.pct_general * 100)}%
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {data.totales.preventivos_ejecutados} de {data.totales.preventivos_planificados} preventivos
-                </p>
-              </CardContent>
-            </Card>
             <Card>
-              <CardContent className="pt-5 text-center">
+              <CardContent className="space-y-2 pt-5 text-center">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Correctivos del período
+                  Correctivos (aparte)
                 </p>
-                <p className="mt-1 text-4xl font-bold">{data.correctivos.total}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {data.correctivos.planificados} con aviso · {data.correctivos.no_planificados} sin aviso
+                <p className="font-mono text-sm font-semibold">
+                  {data.correctivos.realizados} / {data.correctivos.total} realizados
                 </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-5 text-center">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Período
-                </p>
-                <p className="mt-1 text-2xl font-bold">{data.periodo.label}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {esTodos ? (
-                    "Todas las plantas"
-                  ) : (
-                    <span>
-                      Centro: <span className="font-medium">{nombreCentro(data.centro)}</span>
-                    </span>
-                  )}
+                <p className="text-xs text-muted-foreground">
+                  Pendientes: {data.correctivos.pendientes} · {data.periodo.label}
+                  {esTodos ? " · Todas las plantas" : ` · ${nombreCentro(data.centro)}`}
                 </p>
               </CardContent>
             </Card>
           </div>
+
+          <DetalleCalculoPanel data={data} />
 
           {/* Tabla comparativa por centro (modo "todas") */}
           {esTodos && data.por_centro && data.por_centro.length > 0 ? (
@@ -1049,7 +833,13 @@ export function ReporteCumplimientoClient() {
             </div>
           ) : null}
 
-          {/* Cards por especialidad / disciplina */}
+          <div>
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Preventivos por {term.columna.toLowerCase()} {esTodos ? "(consolidado)" : ""}
+            </h2>
+            <TablaEspecialidadPreventivo data={data} columnaLabel={term.columna} />
+          </div>
+
           <div>
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               {term.porCap} {esTodos ? "(consolidado)" : ""}
@@ -1061,12 +851,11 @@ export function ReporteCumplimientoClient() {
             </div>
           </div>
 
-          {/* Tabla resumen especialidad/disciplina × sitio */}
           <div>
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               {term.resumenPor}
             </h2>
-            <ResumenTable data={data} columnaEspLabel={term.columna} />
+            <ResumenSitioTable data={data} columnaEspLabel={term.columna} />
           </div>
 
           {/* Correctivos */}

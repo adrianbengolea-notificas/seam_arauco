@@ -423,3 +423,59 @@ export async function limpiarAntecesorAlCerrarOrden(workOrderId: string): Promis
       { merge: true },
     );
 }
+
+const WO_ANTECESOR_YA_RESUELTO: WorkOrder["estado"][] = ["CERRADA", "ANULADA"];
+
+/**
+ * Repara avisos que siguen apuntando a una OT antecesora ya cerrada/anulada/archivada
+ * (p. ej. cierre fuera del flujo normal que no invocó `limpiarAntecesorAlCerrarOrden`).
+ */
+export async function reconcileAntecesoresObsoletosAdmin(opts?: {
+  centro?: string;
+  /** Si se indica, solo revisa avisos cuyo antecesor es esta OT o esta OT como cerrada. */
+  workOrderId?: string;
+  /** Si se indica, solo revisa este aviso (nuevo SAP) y su antecesor. */
+  avisoId?: string;
+  dryRun?: boolean;
+}): Promise<{ ordenesProcesadas: number; avisosAfectados: number }> {
+  const db = getAdminDb();
+  const centro = opts?.centro?.trim();
+  const dryRun = opts?.dryRun === true;
+  const woIds = new Set<string>();
+
+  if (opts?.workOrderId?.trim()) {
+    woIds.add(opts.workOrderId.trim());
+  }
+
+  if (opts?.avisoId?.trim()) {
+    const av = await getAvisoById(opts.avisoId.trim());
+    const antWo = av?.antecesor_orden_abierta?.work_order_id?.trim();
+    if (antWo) woIds.add(antWo);
+  }
+
+  if (!woIds.size) {
+    let q = db.collection(COLLECTIONS.work_orders).where("estado", "in", WO_ANTECESOR_YA_RESUELTO);
+    if (centro) q = q.where("centro", "==", centro);
+    const snap = await q.limit(4000).get();
+    for (const d of snap.docs) {
+      const wo = d.data() as { archivada?: boolean };
+      if (wo.archivada === true) continue;
+      woIds.add(d.id);
+    }
+  }
+
+  let avisosAfectados = 0;
+  for (const woId of woIds) {
+    const antes = await db
+      .collection(AVISOS_COLLECTION)
+      .where("antecesor_orden_abierta.work_order_id", "==", woId)
+      .limit(80)
+      .get();
+    avisosAfectados += antes.size;
+    if (!dryRun && antes.size > 0) {
+      await limpiarAntecesorAlCerrarOrden(woId);
+    }
+  }
+
+  return { ordenesProcesadas: woIds.size, avisosAfectados };
+}

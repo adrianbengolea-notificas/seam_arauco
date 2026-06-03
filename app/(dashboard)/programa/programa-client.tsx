@@ -1094,7 +1094,22 @@ function AvisoDrawer({
   const ordenPreviaPendienteEfectiva =
     avisoDocId && !avisoFbLoading && (!antecesorWoId || !woAntecesorLoading)
       ? antecesorSigueBloqueando
-      : Boolean(aviso.ordenPreviaPendiente || antecesorWoId);
+      : Boolean(aviso.ordenPreviaPendiente);
+
+  const equipoDisplay =
+    aviso.equipoCodigo?.trim() || avisoFb?.asset_id?.trim() || "—";
+  const ubicacionDisplay =
+    aviso.ubicacion?.trim() || avisoFb?.ubicacion_tecnica?.trim() || "—";
+
+  const etiquetaAbrirOtVinculada = (() => {
+    if (woVinculadaLoading) return "Comprobando orden…";
+    const st = woVinculada?.estado;
+    if (st === "CERRADA" || st === "ANULADA") return "Ver orden";
+    if (st === "EN_EJECUCION" || st === "PENDIENTE_FIRMA_SOLICITANTE" || st === "LISTA_PARA_CIERRE") {
+      return "Continuar trabajo";
+    }
+    return "Abrir orden de trabajo";
+  })();
 
   async function onSubmitReprogramar(e: FormEvent) {
     e.preventDefault();
@@ -1294,6 +1309,20 @@ function AvisoDrawer({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <div className="space-y-4 px-4 py-4 text-sm">
+          {!puedeCrearOt && ordenServicioExistenteId ? (
+            <div className="space-y-2">
+              <Button className="w-full min-h-11 font-semibold" asChild disabled={woVinculadaLoading}>
+                <Link href={`/tareas/${encodeURIComponent(ordenServicioExistenteId)}`}>
+                  {etiquetaAbrirOtVinculada}
+                </Link>
+              </Button>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {woVinculada?.estado === "CERRADA" || woVinculada?.estado === "ANULADA"
+                  ? "Esta orden ya está cerrada en el sistema."
+                  : "Desde acá iniciás o continuás la planilla de la orden vinculada a este aviso."}
+              </p>
+            </div>
+          ) : null}
           {ordenPreviaPendienteEfectiva ? (
             <div
               className="rounded-lg border border-amber-400/70 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100"
@@ -1323,11 +1352,11 @@ function AvisoDrawer({
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Equipo</p>
-              <p className="mt-1 font-mono text-foreground">{aviso.equipoCodigo ?? "—"}</p>
+              <p className="mt-1 font-mono text-foreground">{equipoDisplay}</p>
             </div>
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Ubicación</p>
-              <p className="mt-1 text-foreground">{aviso.ubicacion ?? "—"}</p>
+              <p className="mt-1 text-foreground">{ubicacionDisplay}</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">

@@ -71,8 +71,38 @@ async function planIdsConOrdenPreviaPendiente(items: OtPropuestaFirestore[]): Pr
   return out;
 }
 
+async function metaAvisoPorPlanId(planIds: string[]): Promise<Map<string, { asset_id?: string; ubicacion_tecnica?: string }>> {
+  const out = new Map<string, { asset_id?: string; ubicacion_tecnica?: string }>();
+  const ids = [...new Set(planIds.map((id) => id.trim()).filter(Boolean))];
+  if (!ids.length) return out;
+  const db = getAdminDb();
+  const chunk = 30;
+  for (let i = 0; i < ids.length; i += chunk) {
+    const part = ids.slice(i, i + chunk);
+    const snaps = await db.getAll(...part.map((id) => db.collection(COLLECTIONS.avisos).doc(id)));
+    for (const s of snaps) {
+      if (!s.exists) continue;
+      const d = s.data() as { asset_id?: string; ubicacion_tecnica?: string };
+      const asset = d.asset_id?.trim();
+      const ut = d.ubicacion_tecnica?.trim();
+      if (asset || ut) {
+        out.set(s.id, {
+          ...(asset ? { asset_id: asset } : {}),
+          ...(ut ? { ubicacion_tecnica: ut } : {}),
+        });
+      }
+    }
+  }
+  return out;
+}
+
 async function buildSlotsDesdeItemsAprobados(items: OtPropuestaFirestore[]): Promise<SlotSemanal[]> {
   const conOrdenPrevia = await planIdsConOrdenPreviaPendiente(items);
+  const planIds = items
+    .filter((i) => i.status === "aprobada")
+    .map((i) => i.plan_id?.trim())
+    .filter((x): x is string => Boolean(x));
+  const metaPorPlan = await metaAvisoPorPlanId(planIds);
   const map = new Map<
     string,
     {
@@ -98,6 +128,7 @@ async function buildSlotsDesdeItemsAprobados(items: OtPropuestaFirestore[]): Pro
 
     const planId = item.plan_id?.trim();
     const woId = item.work_order_id?.trim();
+    const meta = planId ? metaPorPlan.get(planId) : undefined;
     const avisoSlot: AvisoSlot = {
       numero: item.numero,
       descripcion: item.descripcion,
@@ -105,6 +136,8 @@ async function buildSlotsDesdeItemsAprobados(items: OtPropuestaFirestore[]): Pro
       urgente: item.prioridad <= 1,
       ...(planId ? { avisoFirestoreId: planId } : {}),
       ...(woId ? { workOrderId: woId } : {}),
+      ...(meta?.asset_id ? { equipoCodigo: meta.asset_id } : {}),
+      ...(meta?.ubicacion_tecnica ? { ubicacion: meta.ubicacion_tecnica } : {}),
       ...(planId && conOrdenPrevia.has(planId) ? { ordenPreviaPendiente: true } : {}),
     };
 

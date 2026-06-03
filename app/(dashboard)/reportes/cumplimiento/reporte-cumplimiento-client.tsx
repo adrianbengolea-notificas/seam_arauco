@@ -14,7 +14,7 @@ import { DEFAULT_CENTRO, KNOWN_CENTROS, nombreCentro } from "@/lib/config/app-co
 import { getClientIdToken, useAuthUser, useUserProfile } from "@/modules/users/hooks";
 import { usePermisos } from "@/lib/permisos/usePermisos";
 import { Download, Loader2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -59,6 +59,21 @@ const chartTooltip = {
 };
 
 const SITIOS: SitioLabel[] = ["Esperanza", "Bossetti", "Yporá", "Piray", "Garita", "Otro"];
+
+/** Etiquetas de UI: en vista cliente se usa «especialidad» en lugar de «disciplina». */
+function terminoReporte(esCliente: boolean) {
+  return {
+    columna: esCliente ? "Especialidad" : "Disciplina",
+    porSitio: esCliente ? "por especialidad y sitio" : "por disciplina y sitio",
+    porCap: esCliente ? "Cumplimiento por especialidad" : "Cumplimiento por disciplina",
+    resumenPor: esCliente
+      ? "Resumen ejecutadas / planificadas por especialidad y sitio"
+      : "Resumen ejecutadas / planificadas por disciplina y sitio",
+    exportNota: esCliente
+      ? "Resumen con colores por especialidad y semáforo de cumplimiento"
+      : "Resumen con colores por disciplina y semáforo de cumplimiento",
+  };
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -301,14 +316,20 @@ function CorrectivoCard({ data }: { data: ReporteCumplimientoData["correctivos"]
   );
 }
 
-function ResumenTable({ data }: { data: ReporteCumplimientoData }) {
+function ResumenTable({
+  data,
+  columnaEspLabel,
+}: {
+  data: ReporteCumplimientoData;
+  columnaEspLabel: string;
+}) {
   const disciplinas: DisciplinaLabel[] = ["AA", "ELECTRICO", "GG"];
   return (
     <div className="overflow-x-auto rounded-lg border">
       <table className="w-full min-w-[560px] text-sm">
         <thead className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
           <tr>
-            <th className="px-4 py-2.5 text-left font-medium">Disciplina</th>
+            <th className="px-4 py-2.5 text-left font-medium">{columnaEspLabel}</th>
             {SITIOS.map((s) => (
               <th key={s} className="px-3 py-2.5 text-right font-medium">{s}</th>
             ))}
@@ -431,7 +452,11 @@ function PorCentroTable({ centros }: { centros: CentroResumen[] }) {
 
 // ─── Excel export con colores (exceljs) ───────────────────────────────────────
 
-async function exportarExcel(data: ReporteCumplimientoData) {
+async function exportarExcel(
+  data: ReporteCumplimientoData,
+  opciones?: { columnaEsp: string },
+) {
+  const columnaEsp = opciones?.columnaEsp ?? "Disciplina";
   // Dynamic import to keep bundle lean
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
@@ -536,7 +561,7 @@ async function exportarExcel(data: ReporteCumplimientoData) {
   ws1.addRow([]);
 
   // Headers tabla preventivos
-  const headers = ["Disciplina", ...SITIOS, "Total Plan.", "Total Ejec.", "% Cumplimiento"];
+  const headers = [columnaEsp, ...SITIOS, "Total Plan.", "Total Ejec.", "% Cumplimiento"];
   const hRow = ws1.addRow(headers);
   applyHeaderStyle(hRow, C.headerBg);
   ws1.getRow(hRow.number).height = 18;
@@ -789,11 +814,21 @@ export function ReporteCumplimientoClient() {
   const { puede, rol } = usePermisos();
 
   const esSuperadmin = rol === "superadmin";
+  const esCliente = rol === "cliente_arauco";
+  const puedeElegirCentro = esSuperadmin || esCliente;
+  const term = terminoReporte(esCliente);
   const centroPerfil = profile?.centro?.trim() || DEFAULT_CENTRO;
+  const centroInicializado = useRef(false);
 
   const [mes, setMes] = useState(now.getMonth() + 1);
   const [año, setAño] = useState(now.getFullYear());
   const [centro, setCentro] = useState(centroPerfil);
+
+  useEffect(() => {
+    if (centroInicializado.current || !rol) return;
+    centroInicializado.current = true;
+    setCentro(esCliente ? "todas" : centroPerfil);
+  }, [rol, esCliente, centroPerfil]);
   const [data, setData] = useState<ReporteCumplimientoData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -834,7 +869,7 @@ export function ReporteCumplimientoClient() {
     if (!data) return;
     setExportando(true);
     try {
-      await exportarExcel(data);
+      await exportarExcel(data, { columnaEsp: term.columna });
     } finally {
       setExportando(false);
     }
@@ -848,7 +883,7 @@ export function ReporteCumplimientoClient() {
         <p className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground">Reportes</p>
         <h1 className="mt-1 text-2xl font-bold tracking-tight">Reporte de cumplimiento</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          OTs preventivas planificadas vs ejecutadas por disciplina y sitio. Correctivos del período.
+          OTs preventivas planificadas vs ejecutadas {term.porSitio}. Correctivos del período.
           Exportable a Excel para la certificación mensual.
         </p>
       </div>
@@ -886,7 +921,7 @@ export function ReporteCumplimientoClient() {
                 ))}
               </select>
             </label>
-            {esSuperadmin ? (
+            {puedeElegirCentro ? (
               <label className="flex flex-col gap-1 text-sm font-medium">
                 Centro
                 <select
@@ -1014,10 +1049,10 @@ export function ReporteCumplimientoClient() {
             </div>
           ) : null}
 
-          {/* Cards por disciplina */}
+          {/* Cards por especialidad / disciplina */}
           <div>
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              Cumplimiento por disciplina {esTodos ? "(consolidado)" : ""}
+              {term.porCap} {esTodos ? "(consolidado)" : ""}
             </h2>
             <div className="grid gap-4 sm:grid-cols-3">
               {(["AA", "ELECTRICO", "GG"] as DisciplinaLabel[]).map((d) => (
@@ -1026,12 +1061,12 @@ export function ReporteCumplimientoClient() {
             </div>
           </div>
 
-          {/* Tabla resumen disciplina × sitio */}
+          {/* Tabla resumen especialidad/disciplina × sitio */}
           <div>
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              Resumen ejecutadas / planificadas por disciplina y sitio
+              {term.resumenPor}
             </h2>
-            <ResumenTable data={data} />
+            <ResumenTable data={data} columnaEspLabel={term.columna} />
           </div>
 
           {/* Correctivos */}
@@ -1044,7 +1079,7 @@ export function ReporteCumplimientoClient() {
 
           <p className="rounded-md border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
             <strong>Exportar Excel</strong> genera un archivo con{esTodos ? " cuatro" : " tres"} hojas:
-            Resumen con colores por disciplina y semáforo de cumplimiento
+            {term.exportNota}
             {esTodos ? ", Comparativo por centro" : ""},
             Preventivos (detalle con estado coloreado) y Correctivos.
           </p>

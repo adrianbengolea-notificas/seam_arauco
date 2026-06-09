@@ -1,6 +1,6 @@
 "use client";
 
-import type { DisciplinaLabel, DisciplinaMetrica, ReporteCumplimientoData } from "@/app/actions/reporte-cumplimiento";
+import type { DisciplinaLabel, DisciplinaMetrica, ReporteCumplimientoData } from "@/lib/reportes/cumplimiento-metrics";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { nombreCentro } from "@/lib/config/app-config";
 import { formulaPctText, SITIOS_REPORTE } from "@/lib/reportes/cumplimiento-metrics";

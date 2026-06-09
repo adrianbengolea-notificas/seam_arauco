@@ -16,87 +16,21 @@ import {
   mergeDiscMap,
   normalizarEsp,
   sitioDesdeUt,
+  type CentroResumen,
+  type CorrectivoFila,
+  type CorrectivosPorEspecialidad,
   type DisciplinaLabel,
   type DisciplinaMetrica,
-  type SitioLabel,
+  type OTFilaDetalle,
+  type ReporteCumplimientoData,
 } from "@/lib/reportes/cumplimiento-metrics";
 import { Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 
-export type { DisciplinaLabel, DisciplinaMetrica, SitioLabel };
-export { META_CORRECTIVOS_REPORTE, META_CRITERIOS_REPORTE };
-
-export type SitioMetrica = DisciplinaMetrica["por_sitio"][number];
-
-export type CorrectivoFila = {
-  n_ot: string;
-  aviso_numero: string;
-  descripcion: string;
-  especialidad: string;
-  ubicacion: string;
-  sitio: SitioLabel;
-  planificado: boolean;
-  ejecutado: boolean;
-  fecha: string | null;
-};
-
-export type OTFilaDetalle = {
-  n_ot: string;
-  aviso_numero: string;
-  descripcion: string;
-  especialidad: DisciplinaLabel | string;
-  frecuencia: string;
-  ubicacion: string;
-  sitio: SitioLabel;
-  estado: string;
-  tipo: "preventivo" | "correctivo";
-  planificada: boolean;
-  ejecutada: boolean;
-  fecha_ejecucion: string | null;
-  fecha_creacion: string;
-};
-
-export type CorrectivosPorEspecialidad = {
-  AA: number;
-  ELECTRICO: number;
-  GG: number;
-  otro: number;
-};
-
-export type CentroResumen = {
-  centro: string;
-  disciplinas: Record<DisciplinaLabel, DisciplinaMetrica>;
-  correctivos: ReporteCumplimientoData["correctivos"];
-  totales: ReporteCumplimientoData["totales"];
-};
-
-export type ReporteCumplimientoData = {
-  periodo: { mes: number; año: number; label: string };
-  centro: string;
-  meta: typeof META_CRITERIOS_REPORTE;
-  meta_correctivos: typeof META_CORRECTIVOS_REPORTE;
-  disciplinas: Record<DisciplinaLabel, DisciplinaMetrica>;
-  correctivos: {
-    planificados: number;
-    no_planificados: number;
-    total: number;
-    realizados: number;
-    pendientes: number;
-    /** Legacy: cerrados / total — no es KPI de certificación preventiva */
-    pct_cumplimiento: number;
-    por_especialidad: CorrectivosPorEspecialidad;
-    detalle: CorrectivoFila[];
-  };
-  ots_detalle: OTFilaDetalle[];
-  totales: {
-    preventivos_planificados: number;
-    preventivos_ejecutados: number;
-    preventivos_pendientes: number;
-    pct_general: number;
-    pct_certificacion: number;
-  };
-  por_centro?: CentroResumen[];
-};
+// Nota: este archivo "use server" solo puede exportar funciones async.
+// Re-exportar tipos o constantes desde acá rompía la evaluación del módulo en
+// producción (ReferenceError al registrar server references). Los tipos y
+// META_* viven en lib/reportes/cumplimiento-metrics.
 
 const MESES_ES = [
   "", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",

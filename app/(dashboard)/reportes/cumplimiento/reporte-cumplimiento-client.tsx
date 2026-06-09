@@ -1,10 +1,10 @@
 "use client";
 
-import {
-  actionGetReporteCumplimiento,
-  type DisciplinaLabel,
-  type ReporteCumplimientoData,
-} from "@/app/actions/reporte-cumplimiento";
+import { actionGetReporteCumplimiento } from "@/app/actions/reporte-cumplimiento";
+import type {
+  DisciplinaLabel,
+  ReporteCumplimientoData,
+} from "@/lib/reportes/cumplimiento-metrics";
 import {
   DetalleCalculoPanel,
   DisciplinaCard,

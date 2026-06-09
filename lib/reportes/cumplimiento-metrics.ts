@@ -113,6 +113,81 @@ export const META_CORRECTIVOS_REPORTE = {
   por_especialidad: "Distribución de correctivos realizados (cerrados en el mes).",
 } as const;
 
+// ─── Tipos del reporte de cumplimiento (compartidos cliente/servidor) ────────
+// Viven acá (y no en la server action) porque un archivo "use server" solo
+// puede exportar funciones async: re-exportar tipos/constantes desde la action
+// rompía la evaluación del módulo en producción.
+
+export type CorrectivoFila = {
+  n_ot: string;
+  aviso_numero: string;
+  descripcion: string;
+  especialidad: string;
+  ubicacion: string;
+  sitio: SitioLabel;
+  planificado: boolean;
+  ejecutado: boolean;
+  fecha: string | null;
+};
+
+export type OTFilaDetalle = {
+  n_ot: string;
+  aviso_numero: string;
+  descripcion: string;
+  especialidad: DisciplinaLabel | string;
+  frecuencia: string;
+  ubicacion: string;
+  sitio: SitioLabel;
+  estado: string;
+  tipo: "preventivo" | "correctivo";
+  planificada: boolean;
+  ejecutada: boolean;
+  fecha_ejecucion: string | null;
+  fecha_creacion: string;
+};
+
+export type CorrectivosPorEspecialidad = {
+  AA: number;
+  ELECTRICO: number;
+  GG: number;
+  otro: number;
+};
+
+export type CentroResumen = {
+  centro: string;
+  disciplinas: Record<DisciplinaLabel, DisciplinaMetrica>;
+  correctivos: ReporteCumplimientoData["correctivos"];
+  totales: ReporteCumplimientoData["totales"];
+};
+
+export type ReporteCumplimientoData = {
+  periodo: { mes: number; año: number; label: string };
+  centro: string;
+  meta: typeof META_CRITERIOS_REPORTE;
+  meta_correctivos: typeof META_CORRECTIVOS_REPORTE;
+  disciplinas: Record<DisciplinaLabel, DisciplinaMetrica>;
+  correctivos: {
+    planificados: number;
+    no_planificados: number;
+    total: number;
+    realizados: number;
+    pendientes: number;
+    /** Legacy: cerrados / total — no es KPI de certificación preventiva */
+    pct_cumplimiento: number;
+    por_especialidad: CorrectivosPorEspecialidad;
+    detalle: CorrectivoFila[];
+  };
+  ots_detalle: OTFilaDetalle[];
+  totales: {
+    preventivos_planificados: number;
+    preventivos_ejecutados: number;
+    preventivos_pendientes: number;
+    pct_general: number;
+    pct_certificacion: number;
+  };
+  por_centro?: CentroResumen[];
+};
+
 export function sitioDesdeUt(ut: string | undefined): SitioLabel {
   if (!ut) return "Otro";
   const prefix = ut.split("-")[0]?.toUpperCase() ?? "";

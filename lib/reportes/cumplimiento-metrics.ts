@@ -158,6 +158,27 @@ export type CentroResumen = {
   disciplinas: Record<DisciplinaLabel, DisciplinaMetrica>;
   correctivos: ReporteCumplimientoData["correctivos"];
   totales: ReporteCumplimientoData["totales"];
+  operativo: ReporteCumplimientoData["operativo"];
+  certificacion: ReporteCumplimientoData["certificacion"];
+};
+
+export type OperativoReporte = {
+  ejecutados_por_especialidad: Record<DisciplinaLabel, number>;
+  total_ejecutados: number;
+  descripcion: string;
+};
+
+export type CertificacionReporte = {
+  configurada: boolean;
+  fuente: "firestore" | "default" | null;
+  año: number;
+  indice: number;
+  pesos: Record<DisciplinaLabel, number>;
+  por_especialidad: Record<
+    DisciplinaLabel,
+    import("@/lib/reportes/certificacion-objetivos").CertificacionDisciplinaResult
+  >;
+  notas?: string;
 };
 
 export type ReporteCumplimientoData = {
@@ -185,6 +206,10 @@ export type ReporteCumplimientoData = {
     pct_general: number;
     pct_certificacion: number;
   };
+  /** Contadores operativos: preventivos cerrados en el mes por especialidad. */
+  operativo: OperativoReporte;
+  /** Certificación contractual vs metas por especialidad (si hay metas para el año). */
+  certificacion: CertificacionReporte;
   por_centro?: CentroResumen[];
 };
 

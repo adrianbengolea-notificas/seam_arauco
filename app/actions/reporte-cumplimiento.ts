@@ -16,14 +16,31 @@ import {
   mergeDiscMap,
   normalizarEsp,
   sitioDesdeUt,
+  timestampToMillis,
   type CentroResumen,
+  type CertificacionReporte,
   type CorrectivoFila,
   type CorrectivosPorEspecialidad,
   type DisciplinaLabel,
   type DisciplinaMetrica,
   type OTFilaDetalle,
+  type OperativoReporte,
   type ReporteCumplimientoData,
 } from "@/lib/reportes/cumplimiento-metrics";
+import {
+  acumularEjecutadosCertificacion,
+  calcularCertificacionDisciplina,
+  calcularIndiceCertificacion,
+  emptyEjecutadosCertificacion,
+  inicioSemestreMs,
+  inicioTrimestreMs,
+  META_OPERATIVO,
+  metasCertificacionParaAño,
+  PESOS_CERTIFICACION_CONTRATO,
+  tierFrecuenciaDesdeOt,
+  type EjecutadosCertificacion,
+  type MetasCertificacion,
+} from "@/lib/reportes/certificacion-objetivos";
 import { Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 
@@ -64,23 +81,198 @@ function esPreventivoPuro(tipo: unknown): boolean {
 
 const TIPOS_CORRECTIVO_REPORTE = ["CORRECTIVO", "EMERGENCIA", "URGENTE"] as const;
 
+function emptyEjecutadosPorDisciplina(): Record<DisciplinaLabel, EjecutadosCertificacion> {
+  return {
+    AA: emptyEjecutadosCertificacion(),
+    ELECTRICO: emptyEjecutadosCertificacion(),
+    GG: emptyEjecutadosCertificacion(),
+  };
+}
+
+async function cargarMetasCertificacion(
+  db: FirebaseFirestore.Firestore,
+  año: number,
+): Promise<{ metas: MetasCertificacion; fuente: "firestore" | "default" } | null> {
+  const snap = await db.collection(COLLECTIONS.metas_certificacion).doc(String(año)).get();
+  if (snap.exists) {
+    const raw = snap.data() as Partial<MetasCertificacion> | undefined;
+    if (raw?.disciplinas?.AA && raw.disciplinas.ELECTRICO && raw.disciplinas.GG) {
+      return {
+        metas: {
+          año,
+          pesos: raw.pesos ?? PESOS_CERTIFICACION_CONTRATO,
+          disciplinas: raw.disciplinas,
+          notas: raw.notas,
+        },
+        fuente: "firestore",
+      };
+    }
+  }
+  const def = metasCertificacionParaAño(año);
+  if (def) return { metas: def, fuente: "default" };
+  return null;
+}
+
+function contarPreventivosCerrados(
+  docs: FirebaseFirestore.QueryDocumentSnapshot[],
+  inicioMs: number,
+  finMs: number,
+  inicioTrimMs: number,
+  inicioSemMs: number,
+  inicioAñoMs: number,
+): Record<DisciplinaLabel, EjecutadosCertificacion> {
+  const out = emptyEjecutadosPorDisciplina();
+
+  for (const doc of docs) {
+    const d = doc.data() as Record<string, unknown>;
+    if (d.archivada === true) continue;
+    if (!esPreventivoPuro(d.tipo_trabajo)) continue;
+    if (d.estado !== "CERRADA") continue;
+
+    const finOtMs = timestampToMillis(d.fecha_fin_ejecucion);
+    if (finOtMs == null || finOtMs < inicioAñoMs || finOtMs >= finMs) continue;
+
+    const esp = normalizarEsp(String(d.especialidad ?? ""));
+    if (!esDisciplina(esp)) continue;
+
+    const tier = tierFrecuenciaDesdeOt({
+      frecuencia_plan_mtsa: d.frecuencia_plan_mtsa as string | undefined,
+      frecuencia: d.frecuencia as string | undefined,
+    });
+
+    const bucket = out[esp];
+    const enMes = finOtMs >= inicioMs && finOtMs < finMs;
+
+    if (enMes) {
+      bucket.totalMes++;
+      if (tier) bucket.mes[tier]++;
+    }
+    if (tier === "T" && finOtMs >= inicioTrimMs && finOtMs < finMs) bucket.acumTrim++;
+    if (tier === "S" && finOtMs >= inicioSemMs && finOtMs < finMs) bucket.acumSem++;
+    if (tier === "A" && finOtMs >= inicioAñoMs && finOtMs < finMs) bucket.acumAnual++;
+  }
+
+  return out;
+}
+
+function mergeEjecutadosCertificacion(
+  base: Record<DisciplinaLabel, EjecutadosCertificacion>,
+  other: Record<DisciplinaLabel, EjecutadosCertificacion>,
+): void {
+  for (const disc of ["AA", "ELECTRICO", "GG"] as DisciplinaLabel[]) {
+    acumularEjecutadosCertificacion(base, disc, other[disc]);
+  }
+}
+
+function armarOperativo(
+  ejecutados: Record<DisciplinaLabel, EjecutadosCertificacion>,
+): OperativoReporte {
+  const aa = ejecutados.AA.totalMes;
+  const el = ejecutados.ELECTRICO.totalMes;
+  const gg = ejecutados.GG.totalMes;
+  return {
+    ejecutados_por_especialidad: { AA: aa, ELECTRICO: el, GG: gg },
+    total_ejecutados: aa + el + gg,
+    descripcion: META_OPERATIVO,
+  };
+}
+
+function armarCertificacion(
+  ejecutados: Record<DisciplinaLabel, EjecutadosCertificacion>,
+  metasPack: { metas: MetasCertificacion; fuente: "firestore" | "default" } | null,
+  año: number,
+  mes: number,
+): CertificacionReporte {
+  if (!metasPack) {
+    return {
+      configurada: false,
+      fuente: null,
+      año,
+      indice: 0,
+      pesos: PESOS_CERTIFICACION_CONTRATO,
+      por_especialidad: {
+        AA: calcularCertificacionDisciplina(
+          { mensual: 0, trimestral: 0, semestral: 0, anual: 0 },
+          ejecutados.AA,
+          mes,
+        ),
+        ELECTRICO: calcularCertificacionDisciplina(
+          { mensual: 0, trimestral: 0, semestral: 0, anual: 0 },
+          ejecutados.ELECTRICO,
+          mes,
+        ),
+        GG: calcularCertificacionDisciplina(
+          { mensual: 0, trimestral: 0, semestral: 0, anual: 0 },
+          ejecutados.GG,
+          mes,
+        ),
+      },
+    };
+  }
+
+  const porEsp = {
+    AA: calcularCertificacionDisciplina(metasPack.metas.disciplinas.AA, ejecutados.AA, mes),
+    ELECTRICO: calcularCertificacionDisciplina(
+      metasPack.metas.disciplinas.ELECTRICO,
+      ejecutados.ELECTRICO,
+      mes,
+    ),
+    GG: calcularCertificacionDisciplina(metasPack.metas.disciplinas.GG, ejecutados.GG, mes),
+  };
+
+  return {
+    configurada: true,
+    fuente: metasPack.fuente,
+    año,
+    indice: calcularIndiceCertificacion(porEsp, metasPack.metas.pesos),
+    pesos: metasPack.metas.pesos,
+    por_especialidad: porEsp,
+    notas: metasPack.metas.notas,
+  };
+}
+
+function enriquecerTotales(
+  totales: ReturnType<typeof calcularTotalesPreventivo>,
+  certificacion: CertificacionReporte,
+): ReturnType<typeof calcularTotalesPreventivo> {
+  if (certificacion.configurada) {
+    return { ...totales, pct_certificacion: certificacion.indice };
+  }
+  return totales;
+}
+
 async function calcularCentro(
   db: FirebaseFirestore.Firestore,
   centro: string,
+  año: number,
+  mes: number,
   inicio: Timestamp,
   fin: Timestamp,
+  metasPack: { metas: MetasCertificacion; fuente: "firestore" | "default" } | null,
   incluirDetalle: boolean,
 ): Promise<{
   discMap: Record<DisciplinaLabel, DisciplinaMetrica>;
   correctivos: ReporteCumplimientoData["correctivos"];
   otsDetalle: OTFilaDetalle[];
+  ejecutadosCert: Record<DisciplinaLabel, EjecutadosCertificacion>;
+  operativo: OperativoReporte;
+  certificacion: CertificacionReporte;
 }> {
-  const [prevSnap, corrCerradosSnap, corrCreadosSnap] = await Promise.all([
+  const inicioAño = Timestamp.fromDate(new Date(año, 0, 1, 0, 0, 0));
+  const [prevSnap, prevCerradosSnap, corrCerradosSnap, corrCreadosSnap] = await Promise.all([
     db
       .collection(COLLECTIONS.work_orders)
       .where("centro", "==", centro)
       .where("fecha_inicio_programada", ">=", inicio)
       .where("fecha_inicio_programada", "<", fin)
+      .get(),
+    db
+      .collection(COLLECTIONS.work_orders)
+      .where("centro", "==", centro)
+      .where("tipo_trabajo", "==", "PREVENTIVO")
+      .where("estado", "==", "CERRADA")
+      .where("fecha_fin_ejecucion", ">=", inicioAño)
+      .where("fecha_fin_ejecucion", "<", fin)
       .get(),
     db
       .collection(COLLECTIONS.work_orders)
@@ -103,6 +295,20 @@ async function calcularCentro(
   const otsDetalle: OTFilaDetalle[] = [];
   const inicioMs = inicio.toMillis();
   const finMs = fin.toMillis();
+  const inicioAñoMs = inicioAño.toMillis();
+  const inicioTrimMs = inicioTrimestreMs(año, mes);
+  const inicioSemMs = inicioSemestreMs(año, mes);
+
+  const ejecutadosCert = contarPreventivosCerrados(
+    prevCerradosSnap.docs,
+    inicioMs,
+    finMs,
+    inicioTrimMs,
+    inicioSemMs,
+    inicioAñoMs,
+  );
+  const operativo = armarOperativo(ejecutadosCert);
+  const certificacion = armarCertificacion(ejecutadosCert, metasPack, año, mes);
 
   for (const doc of prevSnap.docs) {
     const d = doc.data() as Record<string, unknown>;
@@ -228,6 +434,9 @@ async function calcularCentro(
       detalle: corrDetalle,
     },
     otsDetalle,
+    ejecutadosCert,
+    operativo,
+    certificacion,
   };
 }
 
@@ -253,13 +462,17 @@ export async function actionGetReporteCumplimiento(
     const { inicio, fin } = rangeMes(año, mes);
     const db = getAdminDb();
     const periodoLabel = `${MESES_ES[mes]} ${año}`;
+    const metasPack = await cargarMetasCertificacion(db, año);
 
     if (centro === "todas" && centros_lista && centros_lista.length > 0) {
       const resultados = await Promise.all(
-        centros_lista.map((c) => calcularCentro(db, c, inicio, fin, true)),
+        centros_lista.map((c) =>
+          calcularCentro(db, c, año, mes, inicio, fin, metasPack, true),
+        ),
       );
 
       const aggDisc = emptyDiscMap();
+      const aggEjecutados = emptyEjecutadosPorDisciplina();
       let aggCorrPlan = 0;
       let aggCorrNoPlan = 0;
       let aggCorrTotal = 0;
@@ -273,6 +486,7 @@ export async function actionGetReporteCumplimiento(
         const r = resultados[i]!;
         const c = centros_lista[i]!;
         mergeDiscMap(aggDisc, r.discMap);
+        mergeEjecutadosCertificacion(aggEjecutados, r.ejecutadosCert);
         aggCorrPlan += r.correctivos.planificados;
         aggCorrNoPlan += r.correctivos.no_planificados;
         aggCorrTotal += r.correctivos.total;
@@ -284,15 +498,23 @@ export async function actionGetReporteCumplimiento(
         aggOtsDetalle.push(...r.otsDetalle);
         aggCorrDetalle.push(...r.correctivos.detalle);
 
+        const totalesCentro = enriquecerTotales(
+          calcularTotalesPreventivo(r.discMap),
+          r.certificacion,
+        );
         porCentro.push({
           centro: c,
           disciplinas: r.discMap,
           correctivos: r.correctivos,
-          totales: calcularTotalesPreventivo(r.discMap),
+          totales: totalesCentro,
+          operativo: r.operativo,
+          certificacion: r.certificacion,
         });
       }
 
-      const totales = calcularTotalesPreventivo(aggDisc);
+      const operativo = armarOperativo(aggEjecutados);
+      const certificacion = armarCertificacion(aggEjecutados, metasPack, año, mes);
+      const totales = enriquecerTotales(calcularTotalesPreventivo(aggDisc), certificacion);
 
       return success({
         periodo: { mes, año, label: periodoLabel },
@@ -315,16 +537,26 @@ export async function actionGetReporteCumplimiento(
         },
         ots_detalle: aggOtsDetalle,
         totales,
+        operativo,
+        certificacion,
         por_centro: porCentro,
       });
     }
 
-    const { discMap, correctivos, otsDetalle } = await calcularCentro(
+    const resultado = await calcularCentro(
       db,
       centro,
+      año,
+      mes,
       inicio,
       fin,
+      metasPack,
       true,
+    );
+
+    const totales = enriquecerTotales(
+      calcularTotalesPreventivo(resultado.discMap),
+      resultado.certificacion,
     );
 
     return success({
@@ -332,10 +564,12 @@ export async function actionGetReporteCumplimiento(
       centro,
       meta: META_CRITERIOS_REPORTE,
       meta_correctivos: META_CORRECTIVOS_REPORTE,
-      disciplinas: discMap,
-      correctivos,
-      ots_detalle: otsDetalle,
-      totales: calcularTotalesPreventivo(discMap),
+      disciplinas: resultado.discMap,
+      correctivos: resultado.correctivos,
+      ots_detalle: resultado.otsDetalle,
+      totales,
+      operativo: resultado.operativo,
+      certificacion: resultado.certificacion,
     });
   } catch (e) {
     if (e instanceof AppError) return failure(e);

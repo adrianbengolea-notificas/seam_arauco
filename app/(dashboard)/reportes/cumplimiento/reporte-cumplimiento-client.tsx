@@ -6,12 +6,12 @@ import type {
   ReporteCumplimientoData,
 } from "@/lib/reportes/cumplimiento-metrics";
 import {
+  CertificacionPanel,
   DetalleCalculoPanel,
   DisciplinaCard,
   DISC_LABELS,
-  KpiPreventivoHero,
+  OperativoHero,
   PorCentroTable,
-  pctBar,
   ResumenSitioTable,
   TablaEspecialidadPreventivo,
 } from "@/app/(dashboard)/reportes/cumplimiento/reporte-cumplimiento-ui";
@@ -22,7 +22,7 @@ import { formulaPctText, SITIOS_REPORTE } from "@/lib/reportes/cumplimiento-metr
 import { getClientIdToken, useAuthUser, useUserProfile } from "@/modules/users/hooks";
 import { usePermisos } from "@/lib/permisos/usePermisos";
 import { Download, Loader2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -330,19 +330,15 @@ async function exportarExcel(
 
   ws1.mergeCells(2, 1, 2, numCols);
   const kpiCell = ws1.getCell(2, 1);
-  const pctPrev = Math.round(data.totales.pct_general * 100);
-  kpiCell.value = `CUMPLIMIENTO PREVENTIVO (KPI): ${pctPrev}% — ${formulaPctText(
-    data.totales.preventivos_ejecutados,
-    data.totales.preventivos_planificados,
-  )} · Pendientes: ${data.totales.preventivos_pendientes}`;
+  kpiCell.value = `PREVENTIVOS EJECUTADOS (operativo): ${data.operativo.total_ejecutados} — AA ${data.operativo.ejecutados_por_especialidad.AA} · Eléc ${data.operativo.ejecutados_por_especialidad.ELECTRICO} · GG ${data.operativo.ejecutados_por_especialidad.GG}`;
   kpiCell.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: pctPrev >= 90 ? C.pctGreenBg : pctPrev >= 70 ? C.pctAmberBg : C.pctRedBg },
+    fgColor: { argb: C.blueBg },
   };
   kpiCell.font = {
     bold: true,
-    color: { argb: pctFontColor(data.totales.pct_general) },
+    color: { argb: C.blueFg },
     name: "Calibri",
     size: 12,
   };
@@ -352,7 +348,7 @@ async function exportarExcel(
   ws1.mergeCells(3, 1, 3, numCols);
   const certCell = ws1.getCell(3, 1);
   const pctCert = Math.round(data.totales.pct_certificacion * 100);
-  certCell.value = `Índice de certificación (contrato): ${pctCert}% (AA×50% + Eléctrico×40% + GG×10%)`;
+  certCell.value = `Índice de certificación (contrato): ${pctCert}% (AA×50% + Eléctrico×40% + GG×10%)${data.certificacion.configurada ? "" : " — sin metas"}`;
   certCell.font = { italic: true, name: "Calibri", size: 10 };
   certCell.alignment = { horizontal: "center", vertical: "middle" };
 
@@ -626,24 +622,25 @@ export function ReporteCumplimientoClient() {
 
   const esSuperadmin = rol === "superadmin";
   const esCliente = rol === "cliente_arauco";
-  const puedeElegirCentro = esSuperadmin || esCliente;
+  /** Quien ve el reporte puede consolidar todas las plantas (default «todas»). */
+  const puedeElegirCentro =
+    esSuperadmin || esCliente || rol === "admin" || rol === "supervisor";
   const term = terminoReporte(esCliente);
   const centroPerfil = profile?.centro?.trim() || DEFAULT_CENTRO;
-  const centroInicializado = useRef(false);
 
   const [mes, setMes] = useState(now.getMonth() + 1);
   const [año, setAño] = useState(now.getFullYear());
-  const [centro, setCentro] = useState(centroPerfil);
+  const [centro, setCentro] = useState("todas");
 
-  useEffect(() => {
-    if (centroInicializado.current || !rol) return;
-    centroInicializado.current = true;
-    setCentro(esCliente ? "todas" : centroPerfil);
-  }, [rol, esCliente, centroPerfil]);
+  const centroConsulta = useMemo(
+    () => (puedeElegirCentro ? centro : centroPerfil),
+    [puedeElegirCentro, centro, centroPerfil],
+  );
   const [data, setData] = useState<ReporteCumplimientoData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exportando, setExportando] = useState(false);
+  const [vista, setVista] = useState<"operativo" | "certificacion" | "detalle">("operativo");
 
   if (!puede("reportes:ver_cumplimiento")) {
     return (
@@ -665,8 +662,13 @@ export function ReporteCumplimientoClient() {
     try {
       const tok = await getClientIdToken();
       if (!tok) throw new Error("Sin sesión");
-      const centros_lista = centro === "todas" ? [...KNOWN_CENTROS] : undefined;
-      const res = await actionGetReporteCumplimiento(tok, { centro, mes, año, centros_lista });
+      const centros_lista = centroConsulta === "todas" ? [...KNOWN_CENTROS] : undefined;
+      const res = await actionGetReporteCumplimiento(tok, {
+        centro: centroConsulta,
+        mes,
+        año,
+        centros_lista,
+      });
       if (!res.ok) throw new Error(res.error.message);
       setData(res.data);
     } catch (e) {
@@ -694,8 +696,8 @@ export function ReporteCumplimientoClient() {
         <p className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground">Reportes</p>
         <h1 className="mt-1 text-2xl font-bold tracking-tight">Reporte de cumplimiento</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          KPI principal: preventivos programados en el mes (fecha programada) vs ejecutados (cerrados).
-          Correctivos en bloque aparte. Exportable a Excel.
+          Vista operativa: preventivos cerrados en el mes por especialidad. Certificación: índice
+          contractual vs metas por especialidad (AA 50%, Eléctrico 40%, GG 10%).
         </p>
       </div>
 
@@ -751,7 +753,7 @@ export function ReporteCumplimientoClient() {
               </label>
             ) : (
               <p className="self-end text-sm text-muted-foreground">
-                Centro: <span className="font-medium">{nombreCentro(centro)}</span>
+                Centro: <span className="font-medium">{nombreCentro(centroPerfil)}</span>
               </p>
             )}
             <Button
@@ -787,90 +789,108 @@ export function ReporteCumplimientoClient() {
 
       {data ? (
         <div className="space-y-6">
-          <div className="grid gap-4 lg:grid-cols-3">
-            <KpiPreventivoHero data={data} />
-            <Card className="border border-emerald-400/40 bg-emerald-50/40 dark:bg-emerald-950/20">
-              <CardContent className="space-y-2 pt-5 text-center">
-                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-400">
-                  Índice de certificación (contrato)
-                </p>
-                <p className="text-3xl font-bold text-emerald-800 dark:text-emerald-400">
-                  {Math.round(data.totales.pct_certificacion * 100)}%
-                </p>
-                <p className="font-mono text-xs text-muted-foreground">AA×50% + Eléc×40% + GG×10%</p>
-                <div className="grid grid-cols-3 gap-1 text-[0.65rem] text-muted-foreground">
-                  <span>AA {Math.round(data.disciplinas.AA.pct * 100)}%</span>
-                  <span>Eléc {Math.round(data.disciplinas.ELECTRICO.pct * 100)}%</span>
-                  <span>GG {Math.round(data.disciplinas.GG.pct * 100)}%</span>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="space-y-2 pt-5 text-center">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Correctivos (aparte)
-                </p>
-                <p className="font-mono text-sm font-semibold">
-                  {data.correctivos.realizados} / {data.correctivos.total} realizados
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Pendientes: {data.correctivos.pendientes} · {data.periodo.label}
-                  {esTodos ? " · Todas las plantas" : ` · ${nombreCentro(data.centro)}`}
-                </p>
-              </CardContent>
-            </Card>
+          <div className="flex flex-wrap gap-2 border-b pb-2">
+            {(
+              [
+                ["operativo", "Operativo"],
+                ["certificacion", "Certificación"],
+                ["detalle", "Detalle OT"],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setVista(id)}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  vista === id
+                    ? "bg-brand text-white"
+                    : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
-          <DetalleCalculoPanel data={data} />
+          {vista === "operativo" ? (
+            <>
+              <OperativoHero data={data} />
+              <Card>
+                <CardContent className="space-y-2 pt-5 text-center">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Correctivos (aparte)
+                  </p>
+                  <p className="font-mono text-sm font-semibold">
+                    {data.correctivos.realizados} / {data.correctivos.total} realizados
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Pendientes: {data.correctivos.pendientes} · {data.periodo.label}
+                    {esTodos ? " · Todas las plantas" : ` · ${nombreCentro(data.centro)}`}
+                  </p>
+                </CardContent>
+              </Card>
 
-          {/* Tabla comparativa por centro (modo "todas") */}
-          {esTodos && data.por_centro && data.por_centro.length > 0 ? (
-            <div>
-              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Comparativo por centro
-              </h2>
-              <PorCentroTable centros={data.por_centro} />
-            </div>
+              {esTodos && data.por_centro && data.por_centro.length > 0 ? (
+                <div>
+                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Ejecutados por centro
+                  </h2>
+                  <PorCentroTable centros={data.por_centro} />
+                </div>
+              ) : null}
+
+              <div>
+                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Trabajos correctivos
+                </h2>
+                <CorrectivoCard data={data.correctivos} />
+              </div>
+            </>
           ) : null}
 
-          <div>
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              Preventivos por {term.columna.toLowerCase()} {esTodos ? "(consolidado)" : ""}
-            </h2>
-            <TablaEspecialidadPreventivo data={data} columnaLabel={term.columna} />
-          </div>
+          {vista === "certificacion" ? (
+            <>
+              <CertificacionPanel data={data} />
+              {esTodos && data.por_centro && data.por_centro.length > 0 ? (
+                <div>
+                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Índice por centro
+                  </h2>
+                  <PorCentroTable centros={data.por_centro} />
+                </div>
+              ) : null}
+            </>
+          ) : null}
 
-          <div>
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              {term.porCap} {esTodos ? "(consolidado)" : ""}
-            </h2>
-            <div className="grid gap-4 sm:grid-cols-3">
-              {(["AA", "ELECTRICO", "GG"] as DisciplinaLabel[]).map((d) => (
-                <DisciplinaCard key={d} label={d} disc={data.disciplinas[d]} />
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              {term.resumenPor}
-            </h2>
-            <ResumenSitioTable data={data} columnaEspLabel={term.columna} />
-          </div>
-
-          {/* Correctivos */}
-          <div>
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              Trabajos correctivos
-            </h2>
-            <CorrectivoCard data={data.correctivos} />
-          </div>
+          {vista === "detalle" ? (
+            <>
+              <DetalleCalculoPanel data={data} />
+              <div>
+                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Preventivos por {term.columna.toLowerCase()} (OT programadas en el mes)
+                </h2>
+                <TablaEspecialidadPreventivo data={data} columnaLabel={term.columna} />
+              </div>
+              <div>
+                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  {term.resumenPor}
+                </h2>
+                <ResumenSitioTable data={data} columnaEspLabel={term.columna} />
+              </div>
+              <div>
+                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Trabajos correctivos
+                </h2>
+                <CorrectivoCard data={data.correctivos} />
+              </div>
+            </>
+          ) : null}
 
           <p className="rounded-md border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
-            <strong>Exportar Excel</strong> genera un archivo con{esTodos ? " cuatro" : " tres"} hojas:
-            {term.exportNota}
-            {esTodos ? ", Comparativo por centro" : ""},
-            Preventivos (detalle con estado coloreado) y Correctivos.
+            <strong>Operativo</strong>: preventivos cerrados en el mes (sin meta).{" "}
+            <strong>Certificación</strong>: promedio mensual/trim/sem/anual por especialidad vs
+            objetivos contractuales. <strong>Detalle OT</strong>: universo legacy (OT con fecha
+            programada en el mes). Exportar Excel incluye ambos criterios.
           </p>
         </div>
       ) : !loading ? (

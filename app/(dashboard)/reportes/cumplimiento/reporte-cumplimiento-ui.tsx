@@ -1,6 +1,7 @@
 "use client";
 
 import type { DisciplinaLabel, DisciplinaMetrica, ReporteCumplimientoData } from "@/lib/reportes/cumplimiento-metrics";
+import { META_CERTIFICACION } from "@/lib/reportes/certificacion-objetivos";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { nombreCentro } from "@/lib/config/app-config";
 import { formulaPctText, SITIOS_REPORTE } from "@/lib/reportes/cumplimiento-metrics";
@@ -41,6 +42,139 @@ export function pctBar(pct: number) {
   );
 }
 
+export function OperativoHero({ data }: { data: ReporteCumplimientoData }) {
+  const { operativo } = data;
+  const disciplinas: DisciplinaLabel[] = ["AA", "ELECTRICO", "GG"];
+
+  return (
+    <Card className="border-2 border-brand/40 bg-brand/5">
+      <CardContent className="space-y-4 pt-5">
+        <div className="text-center">
+          <p className="text-xs font-semibold uppercase tracking-wide text-brand">
+            Preventivos ejecutados en el período
+          </p>
+          <p className="mt-1 text-4xl font-bold tabular-nums text-brand">
+            {operativo.total_ejecutados}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{operativo.descripcion}</p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {disciplinas.map((d) => (
+            <div
+              key={d}
+              className={`rounded-lg border px-3 py-4 text-center ${DISC_COLOR[d]}`}
+            >
+              <p className="text-xs font-medium opacity-80">{DISC_LABELS[d]}</p>
+              <p className="mt-1 text-3xl font-bold tabular-nums">
+                {operativo.ejecutados_por_especialidad[d]}
+              </p>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function CertificacionPanel({ data }: { data: ReporteCumplimientoData }) {
+  const { certificacion } = data;
+  const disciplinas: DisciplinaLabel[] = ["AA", "ELECTRICO", "GG"];
+
+  if (!certificacion.configurada) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Certificación contractual</CardTitle>
+          <CardDescription className="text-xs">
+            No hay metas configuradas para {certificacion.año}. Cargá objetivos por especialidad en
+            el sistema o usá el año 2026 (valores por defecto del contrato).
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  const pesoLabel = (d: DisciplinaLabel) => `${Math.round(certificacion.pesos[d] * 100)}%`;
+
+  return (
+    <div className="space-y-4">
+      <Card className="border border-emerald-400/40 bg-emerald-50/40 dark:bg-emerald-950/20">
+        <CardContent className="space-y-2 pt-5 text-center">
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-400">
+            Índice de certificación (contrato)
+          </p>
+          <p className="text-4xl font-bold text-emerald-800 dark:text-emerald-400">
+            {Math.round(certificacion.indice * 100)}%
+          </p>
+          <p className="font-mono text-xs text-muted-foreground">
+            AA×{pesoLabel("AA")} + Eléc×{pesoLabel("ELECTRICO")} + GG×{pesoLabel("GG")}
+          </p>
+          <p className="text-xs text-muted-foreground">{META_CERTIFICACION}</p>
+          {certificacion.fuente === "default" ? (
+            <p className="text-[0.65rem] text-muted-foreground">
+              Metas: valores por defecto (certificación Arauco {certificacion.año})
+            </p>
+          ) : (
+            <p className="text-[0.65rem] text-muted-foreground">
+              Metas cargadas en el sistema ({certificacion.año})
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        {disciplinas.map((d) => {
+          const c = certificacion.por_especialidad[d];
+          const planes = c.planes;
+          return (
+            <Card key={d} className={`border ${DISC_COLOR[d]}`}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold">{DISC_LABELS[d]}</CardTitle>
+                <CardDescription className="font-mono text-xs">
+                  Especialidad: {Math.round(c.pct_especialidad * 100)}% (prom. 4 niveles)
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2 text-xs">
+                <div className="flex justify-between gap-2">
+                  <span>Mensual</span>
+                  <span className="font-mono tabular-nums">
+                    {c.ejecutados.mes.M} / {planes.mensual} → {Math.round(c.pct_mensual * 100)}%
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span>Trimestral (acum.)</span>
+                  <span className="font-mono tabular-nums">
+                    {c.ejecutados.acumTrim} / {planes.trimAcum.toFixed(1)} →{" "}
+                    {Math.round(c.pct_trimestral * 100)}%
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span>Semestral (acum.)</span>
+                  <span className="font-mono tabular-nums">
+                    {c.ejecutados.acumSem} / {planes.semAcum.toFixed(1)} →{" "}
+                    {Math.round(c.pct_semestral * 100)}%
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span>Anual (acum.)</span>
+                  <span className="font-mono tabular-nums">
+                    {c.ejecutados.acumAnual} / {planes.anualAcum.toFixed(1)} →{" "}
+                    {Math.round(c.pct_anual * 100)}%
+                  </span>
+                </div>
+                <p className="border-t pt-2 text-muted-foreground">
+                  Total cerrados en el mes: {c.ejecutados.totalMes}
+                </p>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** @deprecated Vista legacy OT programadas vs ejecutadas — oculta en UI principal */
 export function KpiPreventivoHero({ data }: { data: ReporteCumplimientoData }) {
   const { totales } = data;
   return (
@@ -351,8 +485,7 @@ export function PorCentroTable({
             {disciplinas.map((d) => (
               <th key={d} className="px-3 py-2.5 text-right font-medium">{DISC_LABELS[d]}</th>
             ))}
-            <th className="px-3 py-2.5 text-right font-medium">Preventivos</th>
-            <th className="px-3 py-2.5 text-right font-medium">Pend.</th>
+            <th className="px-3 py-2.5 text-right font-medium">Total prev.</th>
             <th className="px-3 py-2.5 text-right font-medium">Correctivos</th>
             <th className="px-3 py-2.5 text-right font-medium">Índice certif.</th>
           </tr>
@@ -364,29 +497,19 @@ export function PorCentroTable({
                 <span className="text-xs">{nombreCentro(c.centro)}</span>
               </td>
               {disciplinas.map((d) => (
-                <td key={d} className="px-3 py-2 text-right text-xs">
-                  {c.disciplinas[d].planificadas > 0 ? (
-                    <span className="space-x-1 tabular-nums">
-                      <span className="font-medium">{c.disciplinas[d].ejecutadas}</span>
-                      <span className="text-muted-foreground">/{c.disciplinas[d].planificadas}</span>
-                      <span>{pctBadge(c.disciplinas[d].pct)}</span>
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
+                <td key={d} className="px-3 py-2 text-right text-xs tabular-nums font-medium">
+                  {c.operativo.ejecutados_por_especialidad[d]}
                 </td>
               ))}
-              <td className="px-3 py-2 text-right text-xs tabular-nums">
-                {c.totales.preventivos_ejecutados}/{c.totales.preventivos_planificados}{" "}
-                {pctBadge(c.totales.pct_general)}
-              </td>
-              <td className="px-3 py-2 text-right text-xs tabular-nums">
-                {c.totales.preventivos_pendientes}
+              <td className="px-3 py-2 text-right text-xs tabular-nums font-semibold">
+                {c.operativo.total_ejecutados}
               </td>
               <td className="px-3 py-2 text-right text-xs tabular-nums">
                 {c.correctivos.realizados}/{c.correctivos.total}
               </td>
-              <td className="px-3 py-2 text-right">{pctBadge(c.totales.pct_certificacion)}</td>
+              <td className="px-3 py-2 text-right">
+                {c.certificacion.configurada ? pctBadge(c.certificacion.indice) : "—"}
+              </td>
             </tr>
           ))}
         </tbody>

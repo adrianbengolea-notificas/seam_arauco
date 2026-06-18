@@ -19,6 +19,8 @@ export const COLLECTIONS = {
   propuestas_semana: "propuestas_semana",
   /** Anti-duplicado ejecución cron motor (Admin SDK; sin acceso cliente). */
   motor_ot_diario_runs: "motor_ot_diario_runs",
+  /** Metas de certificación contractual por año (`metas_certificacion/{año}`). */
+  metas_certificacion: "metas_certificacion",
 } as const;
 
 export const PLAN_MANTENIMIENTO_COLLECTION = COLLECTIONS.plan_mantenimiento;

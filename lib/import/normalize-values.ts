@@ -166,9 +166,21 @@ export function inferFrecuenciaMTSADescripcion(descripcion: string): "S" | "A" {
  * Especialidad explícita en texto SAP (p. ej. «MTTO ANUAL AA», «MTTO SEMESTRAL GG»).
  * Devuelve null si el texto no indica una especialidad con claridad.
  */
+/** Token «gg» explícito (no subcadena de «ssgg», plan SAP ambiguo). */
+function textoTieneTokenGgExplicito(d: string): boolean {
+  if (d.includes("grupo generador")) return true;
+  if (d.includes(" gg ") || d.startsWith("gg ") || d.endsWith(" gg")) return true;
+  if (d.includes("mtto") && /\bgg\b/.test(d)) return true;
+  return false;
+}
+
 export function especialidadExplicitaDesdeTexto(texto: string | null | undefined): Especialidad | null {
   if (!texto?.trim()) return null;
   const d = normalizeImportKey(texto);
+  if (d.includes("ssgg 02") || d.includes("ssgg02")) return "GG";
+  if (d.includes("ssgg 01") || d.includes("ssgg01")) return "ELECTRICO";
+  /** «MTTO …-SSGG» sin 01/02: nombre de plan SAP, no disciplina de generador. */
+  if (d.includes("ssgg")) return null;
   if (
     d.includes(" aa ") ||
     d.startsWith("aa ") ||
@@ -177,13 +189,7 @@ export function especialidadExplicitaDesdeTexto(texto: string | null | undefined
   ) {
     return "AA";
   }
-  if (
-    d.includes(" gg ") ||
-    d.startsWith("gg ") ||
-    d.endsWith(" gg") ||
-    (d.includes("mtto") && d.includes("gg")) ||
-    d.includes("grupo generador")
-  ) {
+  if (textoTieneTokenGgExplicito(d)) {
     return "GG";
   }
   if (d.includes(" hg ") || d.startsWith("hg ") || d.endsWith(" hg") || d.includes("hidrogrua")) {

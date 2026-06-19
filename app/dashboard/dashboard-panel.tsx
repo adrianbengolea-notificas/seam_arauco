@@ -398,7 +398,7 @@ export function DashboardPanel() {
           ) : (
             <div className="grid gap-4 sm:grid-cols-4">
               <Link
-                href="/programa/preventivos?pestana=vencimientos&filter=vencido"
+                href="/programa/preventivos?pestana=vencimientos&tab=seguimiento&filter=vencido"
                 className="block rounded-xl outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-brand/40"
               >
                 <StatCard
@@ -411,7 +411,7 @@ export function DashboardPanel() {
                 </StatCard>
               </Link>
               <Link
-                href="/programa/preventivos?pestana=vencimientos&filter=proximo"
+                href="/programa/preventivos?pestana=vencimientos&tab=seguimiento&filter=proximo"
                 className="block rounded-xl outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-brand/40"
               >
                 <StatCard
@@ -424,7 +424,7 @@ export function DashboardPanel() {
                 </StatCard>
               </Link>
               <Link
-                href="/programa/preventivos?pestana=vencimientos&filter=ok"
+                href="/programa/preventivos?pestana=vencimientos&tab=seguimiento&filter=ok"
                 className="block rounded-xl outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-brand/40"
               >
                 <StatCard
@@ -437,7 +437,7 @@ export function DashboardPanel() {
                 </StatCard>
               </Link>
               <Link
-                href="/programa/preventivos?pestana=vencimientos&tab=sin_historial"
+                href="/programa/preventivos?pestana=vencimientos"
                 className="block rounded-xl outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-brand/40"
               >
                 <StatCard

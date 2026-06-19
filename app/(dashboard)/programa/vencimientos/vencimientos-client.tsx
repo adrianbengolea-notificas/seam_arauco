@@ -145,11 +145,11 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
   /** Centro del perfil; fallback al default de app para no disparar consulta global sin filtro (operarios). */
   const centro = profile?.centro?.trim() || DEFAULT_CENTRO;
 
-  const tab = sp.get("tab") === "sin_historial" ? "sin_historial" : "seguimiento";
+  const tab = sp.get("tab") === "seguimiento" ? "seguimiento" : "sin_historial";
   const setTab = useCallback(
     (t: "seguimiento" | "sin_historial") => {
       const p = mergeHubVencimientosQuery(pathname, new URLSearchParams(sp.toString()));
-      if (t === "sin_historial") p.set("tab", "sin_historial");
+      if (t === "seguimiento") p.set("tab", "seguimiento");
       else p.delete("tab");
       const qs = p.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
@@ -207,28 +207,28 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
 
   const hrefSinHistorialList = useMemo(() => {
     const p = mergeHubVencimientosQuery(pathname, new URLSearchParams(sp.toString()));
-    p.set("tab", "sin_historial");
+    p.delete("tab");
     p.delete("filter");
     return `${pathname}?${p.toString()}#preventivos-sa-detalle`;
   }, [pathname, sp]);
 
   const hrefFilterVencido = useMemo(() => {
     const p = mergeHubVencimientosQuery(pathname, new URLSearchParams(sp.toString()));
-    p.delete("tab");
+    p.set("tab", "seguimiento");
     p.set("filter", "vencido");
     return `${pathname}?${p.toString()}#preventivos-sa-detalle`;
   }, [pathname, sp]);
 
   const hrefFilterProximo = useMemo(() => {
     const p = mergeHubVencimientosQuery(pathname, new URLSearchParams(sp.toString()));
-    p.delete("tab");
+    p.set("tab", "seguimiento");
     p.set("filter", "proximo");
     return `${pathname}?${p.toString()}#preventivos-sa-detalle`;
   }, [pathname, sp]);
 
   const hrefFilterOk = useMemo(() => {
     const p = mergeHubVencimientosQuery(pathname, new URLSearchParams(sp.toString()));
-    p.delete("tab");
+    p.set("tab", "seguimiento");
     p.set("filter", "ok");
     return `${pathname}?${p.toString()}#preventivos-sa-detalle`;
   }, [pathname, sp]);
@@ -287,6 +287,29 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
     }
     return rows;
   }, [avisos, busqueda, centroF, esp, estadoF, freq, semanaProgF, tab, superadmin]);
+
+  /** GG (u otra esp.) sin ejecución: visibles solo en pestaña «Sin ejecución cargada». */
+  const conteoMismaEspOtraPestana = useMemo(() => {
+    if (esp === "todos") return 0;
+    const pasaEsp = (a: AvisoConVencimiento) => avisoPasaFiltroEspecialidadUi(a, esp);
+    const pasaCentro =
+      !superadmin || !centroF.trim() ? () => true : (a: AvisoConVencimiento) => a.centro === centroF.trim();
+    const pasaFreq = freq === "todos" ? () => true : (a: AvisoConVencimiento) => a.frecuencia_plan_mtsa === freq;
+    let rows = avisos.filter((a) => pasaEsp(a) && pasaCentro(a) && pasaFreq(a));
+    if (semanaProgF === "con_semana") {
+      rows = rows.filter((a) => avisoTieneCoberturaPlanSemanal(a));
+    } else if (semanaProgF === "sin_semana") {
+      rows = rows.filter((a) => !avisoTieneCoberturaPlanSemanal(a));
+    }
+    if (tab === "sin_historial") {
+      return rows.filter(
+        (a) => Boolean(a.ultima_ejecucion_fecha) || avisoTieneOrdenServicioVinculada(a),
+      ).length;
+    }
+    return rows.filter(
+      (a) => !a.ultima_ejecucion_fecha && !avisoTieneOrdenServicioVinculada(a),
+    ).length;
+  }, [avisos, centroF, esp, freq, semanaProgF, superadmin, tab]);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [pick, setPick] = useState<AvisoConVencimiento | null>(null);
@@ -1002,13 +1025,33 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
           </tbody>
         </table>
         {!loading && filtrados.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-            {avisos.length > 0
-              ? `Ninguno de los ${avisos.length} preventivos cargados coincide con los filtros activos (pestaña, especialidad, frecuencia, semana en programa…). Probá «Todos» en cada selector.`
-              : tab === "sin_historial"
-                ? "No hay preventivos sin OT vinculada ni historial de cierre con estos filtros."
-                : "No hay preventivos con estos filtros."}
-          </p>
+          <div className="space-y-2 px-4 py-6 text-center text-sm text-muted-foreground">
+            <p>
+              {avisos.length > 0
+                ? `Ninguno de los ${avisos.length} preventivos cargados coincide con los filtros activos (pestaña, especialidad, frecuencia, semana en programa…). Probá «Todos» en cada selector.`
+                : tab === "sin_historial"
+                  ? "No hay preventivos sin OT vinculada ni historial de cierre con estos filtros."
+                  : "No hay preventivos con estos filtros."}
+            </p>
+            {avisos.length > 0 && conteoMismaEspOtraPestana > 0 ? (
+              <p>
+                Hay{" "}
+                <strong className="text-foreground">{conteoMismaEspOtraPestana}</strong> con estos filtros de
+                especialidad/frecuencia en la pestaña{" "}
+                <strong className="text-foreground">
+                  {tab === "sin_historial" ? "«Con historial de ejecución»" : "«Sin ejecución cargada»"}
+                </strong>
+                .{" "}
+                <button
+                  type="button"
+                  className="font-medium text-primary underline-offset-2 hover:underline"
+                  onClick={() => setTab(tab === "sin_historial" ? "seguimiento" : "sin_historial")}
+                >
+                  Cambiar pestaña
+                </button>
+              </p>
+            ) : null}
+          </div>
         ) : null}
         {!loading && filtrados.length > 0 && filtrados.length < avisos.length ? (
           <p className="border-t border-border px-4 py-2 text-center text-xs text-muted-foreground">

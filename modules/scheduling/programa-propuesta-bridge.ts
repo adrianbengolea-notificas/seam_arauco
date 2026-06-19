@@ -15,7 +15,7 @@ import type {
   ProgramaSemana,
   SlotSemanal,
 } from "@/modules/scheduling/types";
-import { updateWorkOrderDoc } from "@/modules/work-orders/repository";
+import { getWorkOrderById, updateWorkOrderDoc } from "@/modules/work-orders/repository";
 import { createWorkOrderFromAviso } from "@/modules/work-orders/service";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { randomUUID } from "node:crypto";
@@ -299,6 +299,15 @@ export async function generarOtsDesdePrograma(
     for (const av of slot.avisos ?? []) {
       const woId = av.workOrderId?.trim();
       if (woId) {
+        const woExistente = await getWorkOrderById(woId);
+        if (
+          woExistente?.estado === "CERRADA" ||
+          woExistente?.estado === "ANULADA"
+        ) {
+          // No reprogramar OT ya cerrada: evita que aparezca en reportes de meses futuros
+          // por fecha_inicio_programada actualizada.
+          continue;
+        }
         await updateWorkOrderDoc(woId, {
           fecha_inicio_programada: slot.fecha as Timestamp,
           ...(slot.tecnicoSugeridoUid

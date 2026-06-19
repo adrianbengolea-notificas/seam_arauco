@@ -255,7 +255,7 @@ export function VencimientosClient({ dentroDelHub = false }: { dentroDelHub?: bo
     if (superadmin && centroF.trim()) {
       rows = rows.filter((a) => a.centro === centroF.trim());
     }
-    rows = rows.filter((a) => avisoPasaFiltroEspecialidadUi(a.especialidad, esp));
+    rows = rows.filter((a) => avisoPasaFiltroEspecialidadUi(a, esp));
     if (freq !== "todos") {
       rows = rows.filter((a) => a.frecuencia_plan_mtsa === freq);
     }

@@ -50,6 +50,7 @@ import {
 } from "@/modules/scheduling/hooks";
 import { useWorkOrderLive } from "@/modules/work-orders/hooks";
 import { useWorkOrderEstadosForIds } from "@/modules/work-orders/use-work-order-estados-for-ids";
+import { useWorkOrderIdPorAvisoBusqueda } from "@/modules/work-orders/use-work-order-id-por-aviso-busqueda";
 import type { WorkOrderEstado } from "@/modules/work-orders/types";
 import { propuestaSemanaDocId } from "@/lib/scheduling/propuesta-id";
 import {
@@ -1071,10 +1072,25 @@ function AvisoDrawer({
     aviso.workOrderId?.trim() ||
     avisoFb?.ultima_ejecucion_ot_id?.trim() ||
     undefined;
-  const avisoCerradoSinOtVisible = avisoFb?.estado === "CERRADO" && !ordenServicioExistenteId;
-  const { workOrder: woVinculada, loading: woVinculadaLoading } = useWorkOrderLive(ordenServicioExistenteId);
+  const buscarOtPorAvisoCerrado =
+    avisoFb?.estado === "CERRADO" && !ordenServicioExistenteId && !avisoFbLoading;
+  const centrosBusquedaOt = useMemo(() => {
+    const c = avisoFb?.centro?.trim();
+    return c ? [c] : [];
+  }, [avisoFb?.centro]);
+  const { workOrderId: otIdPorBusqueda, loading: otBusquedaLoading } = useWorkOrderIdPorAvisoBusqueda({
+    avisoDocId,
+    avisoNumero: aviso.numero,
+    centros: centrosBusquedaOt,
+    buscarEnTodasLasPlantas: centrosBusquedaOt.length === 0,
+    enabled: buscarOtPorAvisoCerrado,
+  });
+  const ordenServicioIdEfectiva = ordenServicioExistenteId || otIdPorBusqueda;
+  const avisoCerradoSinOtVisible =
+    avisoFb?.estado === "CERRADO" && !ordenServicioIdEfectiva && !avisoFbLoading && !otBusquedaLoading;
+  const { workOrder: woVinculada, loading: woVinculadaLoading } = useWorkOrderLive(ordenServicioIdEfectiva);
   const puedeCorregirFechaRealizacion =
-    esSuperadmin && woVinculada?.estado === "CERRADA" && Boolean(ordenServicioExistenteId?.trim());
+    esSuperadmin && woVinculada?.estado === "CERRADA" && Boolean(ordenServicioIdEfectiva?.trim());
 
   useEffect(() => {
     if (woVinculada) setCorrFecha(fechaFinEjecucionIsoDesdeWo(woVinculada));
@@ -1171,7 +1187,7 @@ function AvisoDrawer({
         avisoNumero: estado.aviso.numero.trim(),
         avisoFirestoreId: estado.aviso.avisoFirestoreId?.trim() || undefined,
         workOrderId:
-          ordenServicioExistenteId?.trim() ||
+          ordenServicioIdEfectiva?.trim() ||
           estado.aviso.workOrderId?.trim() ||
           undefined,
         from: {
@@ -1198,7 +1214,7 @@ function AvisoDrawer({
 
   async function onSubmitCorregirFechaRealizacion(e: FormEvent) {
     e.preventDefault();
-    if (!ordenServicioExistenteId?.trim()) return;
+    if (!ordenServicioIdEfectiva?.trim()) return;
     setCorrMsg(null);
     setCorrBusy(true);
     try {
@@ -1208,7 +1224,7 @@ function AvisoDrawer({
         return;
       }
       const res = await actionCorrectWorkOrderFechaRealizacion(tok, {
-        workOrderId: ordenServicioExistenteId.trim(),
+        workOrderId: ordenServicioIdEfectiva.trim(),
         fechaEjecucion: corrFecha,
         motivo: corrMotivo,
       });
@@ -1232,7 +1248,7 @@ function AvisoDrawer({
   }
 
   async function onArchivarOrdenExistente() {
-    if (!ordenServicioExistenteId) return;
+    if (!ordenServicioIdEfectiva) return;
     if (
       !window.confirm(
         "¿Archivar esta orden de trabajo? Dejará de mostrarse en listados y se desvincula del aviso en el programa.",
@@ -1249,7 +1265,7 @@ function AvisoDrawer({
         return;
       }
       const res = await actionArchiveWorkOrder(tok, {
-        workOrderId: ordenServicioExistenteId.trim(),
+        workOrderId: ordenServicioIdEfectiva.trim(),
         programa: {
           programaDocId: estado.programaDocId.trim(),
           localidad: localidadCeldaFirestoreParaServidor(estado.slot),
@@ -1309,10 +1325,10 @@ function AvisoDrawer({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <div className="space-y-4 px-4 py-4 text-sm">
-          {!puedeCrearOt && ordenServicioExistenteId ? (
+          {!puedeCrearOt && ordenServicioIdEfectiva ? (
             <div className="space-y-2">
               <Button className="w-full min-h-11 font-semibold" asChild disabled={woVinculadaLoading}>
-                <Link href={`/tareas/${encodeURIComponent(ordenServicioExistenteId)}`}>
+                <Link href={`/tareas/${encodeURIComponent(ordenServicioIdEfectiva)}`}>
                   {etiquetaAbrirOtVinculada}
                 </Link>
               </Button>
@@ -1363,7 +1379,31 @@ function AvisoDrawer({
             <Badge variant={avisoVariant(aviso)}>
               {aviso.urgente ? "Urgente" : aviso.tipo === "correctivo" ? "Correctivo" : "Preventivo"}
             </Badge>
+            {avisoFb?.estado === "CERRADO" ? (
+              <Badge
+                variant="default"
+                className="border border-emerald-600/40 bg-emerald-600/10 text-emerald-950 dark:text-emerald-100"
+              >
+                Aviso cerrado
+              </Badge>
+            ) : null}
           </div>
+          {avisoFb?.estado === "CERRADO" && !ordenServicioIdEfectiva && !avisoFbLoading && !otBusquedaLoading ? (
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 dark:border-zinc-700 dark:bg-zinc-900/50">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Condición del aviso</p>
+              <p className="mt-2 text-sm text-foreground">
+                Cerrado en el maestro de mantenimiento
+                {avisoFb.ultima_ejecucion_fecha
+                  ? ` · última ejecución ${formatFirestoreDate(avisoFb.ultima_ejecucion_fecha, "dd/MM/yyyy")}`
+                  : ""}
+                .
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                No hay una orden de trabajo en el sistema vinculada a este número (p. ej. cerrado desde SAP o importación
+                histórica). Por eso no aparece en Tareas.
+              </p>
+            </div>
+          ) : null}
           </div>
         {puedeReprogramar && semanasOpciones.length > 0 ? (
           <form
@@ -1510,12 +1550,12 @@ function AvisoDrawer({
               {corrBusy ? "Guardando…" : "Guardar fecha de realización"}
             </Button>
           </form>
-        ) : esSuperadmin && ordenServicioExistenteId && woVinculadaLoading ? (
+        ) : esSuperadmin && ordenServicioIdEfectiva && woVinculadaLoading ? (
           <p className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
             Comprobando estado de la orden…
           </p>
         ) : null}
-        {puedeCrearOt && esSuperadmin && ordenServicioExistenteId ? (
+        {puedeCrearOt && esSuperadmin && ordenServicioIdEfectiva ? (
           <div className="space-y-2 border-t border-border px-4 py-4">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Archivo</p>
             <p className="text-xs leading-relaxed text-muted-foreground">
@@ -1544,10 +1584,10 @@ function AvisoDrawer({
         ) : null}
         {puedeCrearOt ? (
           <div className="space-y-2 border-t border-border p-4">
-            {ordenServicioExistenteId ? (
+            {ordenServicioIdEfectiva ? (
               <>
                 <Button className="w-full" asChild>
-                  <Link href={`/tareas/${encodeURIComponent(ordenServicioExistenteId)}`}>
+                  <Link href={`/tareas/${encodeURIComponent(ordenServicioIdEfectiva)}`}>
                     Abrir OT
                   </Link>
                 </Button>
@@ -1562,17 +1602,14 @@ function AvisoDrawer({
                         : ""}
                 </p>
               </>
-            ) : avisoDocId && avisoFbLoading ? (
+            ) : avisoDocId && (avisoFbLoading || otBusquedaLoading) ? (
               <Button className="w-full" type="button" disabled>
                 Comprobando si ya hay orden…
               </Button>
             ) : avisoCerradoSinOtVisible ? (
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Este aviso ya está cerrado. Para ajustar la fecha de realización, abrí la OT desde{" "}
-                <Link href="/tareas" className="font-semibold underline underline-offset-2">
-                  Tareas
-                </Link>
-                .
+                Este aviso está cerrado y no tiene OT en el sistema. El estado figura arriba en{" "}
+                <span className="font-semibold text-foreground">Condición del aviso</span>.
               </p>
             ) : (
               <Button className="w-full" asChild>

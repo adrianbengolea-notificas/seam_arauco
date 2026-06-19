@@ -1,7 +1,10 @@
 /**
  * Métricas de cumplimiento preventivo (certificación mensual).
- * Universo único: OT tipo PREVENTIVO con fecha_inicio_programada en el período.
+ * Operativo: preventivos CERRADOS en el mes (fecha_fin_ejecucion).
+ * Legacy KPI: OT programadas en el mes que no estaban ya cerradas en meses anteriores.
  */
+
+import { mesCalendarioArgentina } from "@/lib/reportes/periodo-reporte";
 
 export type DisciplinaLabel = "AA" | "ELECTRICO" | "GG";
 
@@ -50,7 +53,7 @@ export type TotalesPreventivo = {
 
 export const META_CRITERIOS_REPORTE = {
   programados:
-    "OT preventivas con fecha de inicio programada dentro del mes seleccionado (no incluye correctivos ni emergencias).",
+    "OT preventivas con fecha de inicio programada en el mes, excluidas las ya cerradas en meses anteriores.",
   ejecutados:
     "Del mismo universo: OT CERRADA cuya fecha de cierre (fecha_fin_ejecucion) cae en el mes. Si el cierre fue manual con otra fecha, se usa esa fecha registrada en la OT.",
   pendientes: "Programados − ejecutados (mismo universo).",
@@ -60,6 +63,7 @@ export const META_CRITERIOS_REPORTE = {
 /** Acepta Timestamp de Firestore Admin o serialización JSON. */
 export function timestampToMillis(ts: unknown): number | null {
   if (ts == null) return null;
+  if (typeof ts === "number" && Number.isFinite(ts)) return ts;
   if (typeof ts === "object") {
     const o = ts as { toMillis?: () => number; seconds?: number; _seconds?: number };
     if (typeof o.toMillis === "function") {
@@ -74,6 +78,25 @@ export function timestampToMillis(ts: unknown): number | null {
     if (typeof sec === "number" && Number.isFinite(sec)) return sec * 1000;
   }
   return null;
+}
+
+/**
+ * OT ya cerrada en un mes anterior al reporte (p. ej. ejecutada en abril pero reprogramada
+ * en junio por el motor de programa). No debe figurar en el mes posterior.
+ */
+export function otCerradaAntesDelMesReporte(
+  estado: unknown,
+  fechaFinEjecucion: unknown,
+  añoReporte: number,
+  mesReporte: number,
+): boolean {
+  if (estado !== "CERRADA") return false;
+  const finMs = timestampToMillis(fechaFinEjecucion);
+  if (finMs == null) return false;
+  const cal = mesCalendarioArgentina(finMs);
+  if (cal.año < añoReporte) return true;
+  if (cal.año === añoReporte && cal.mes < mesReporte) return true;
+  return false;
 }
 
 /** Cierre en [inicioMs, finMs) — fin exclusivo, mismo criterio que el rango del mes. */

@@ -162,6 +162,44 @@ export function inferFrecuenciaMTSADescripcion(descripcion: string): "S" | "A" {
   return "S";
 }
 
+/**
+ * Especialidad explícita en texto SAP (p. ej. «MTTO ANUAL AA», «MTTO SEMESTRAL GG»).
+ * Devuelve null si el texto no indica una especialidad con claridad.
+ */
+export function especialidadExplicitaDesdeTexto(texto: string | null | undefined): Especialidad | null {
+  if (!texto?.trim()) return null;
+  const d = normalizeImportKey(texto);
+  if (
+    d.includes(" aa ") ||
+    d.startsWith("aa ") ||
+    d.endsWith(" aa") ||
+    (d.includes("mtto") && d.includes("aa"))
+  ) {
+    return "AA";
+  }
+  if (
+    d.includes(" gg ") ||
+    d.startsWith("gg ") ||
+    d.endsWith(" gg") ||
+    (d.includes("mtto") && d.includes("gg")) ||
+    d.includes("grupo generador")
+  ) {
+    return "GG";
+  }
+  if (d.includes(" hg ") || d.startsWith("hg ") || d.endsWith(" hg") || d.includes("hidrogrua")) {
+    return "HG";
+  }
+  if (
+    d.includes("elec") ||
+    d.includes("tablero") ||
+    d.includes("ccm") ||
+    d.includes("proteccion")
+  ) {
+    return "ELECTRICO";
+  }
+  return null;
+}
+
 /** Heurística legada (listado semestral/anual): especialidad cuando la celda viene vacía o rara. */
 export function inferEspecialidadDesdeDescripcionYPto(descripcion: string, ptoTrbRes: string): "A" | "E" | "GG" | "HG" {
   const d = normalizeImportKey(descripcion);

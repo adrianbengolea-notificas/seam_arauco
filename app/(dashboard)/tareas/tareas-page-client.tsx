@@ -17,6 +17,8 @@ import {
   workOrderNumeroOperativo,
   workOrderReferenciasDistintas,
 } from "@/modules/work-orders/n-ot-from-aviso";
+import { coincideOtConNumeroAviso } from "@/modules/work-orders/resolver-ot-por-aviso";
+import { useWorkOrderIdPorAvisoBusqueda } from "@/modules/work-orders/use-work-order-id-por-aviso-busqueda";
 import {
   workOrderFrecuenciaBadge,
   workOrderSubtipo,
@@ -259,6 +261,7 @@ export function TareasPageClient() {
   const [tab, setTab] = useState<WorkOrderEspecialidadTab>("ALL");
   const [statusFilter, setStatusFilter] = useState<WorkOrderVistaStatus | "ALL">("ALL");
   const [soloOrdenPreviaSap, setSoloOrdenPreviaSap] = useState(false);
+  const avisoParam = searchParams.get("aviso")?.trim() ?? "";
 
   useEffect(() => {
     if (authLoading) return;
@@ -305,10 +308,49 @@ export function TareasPageClient() {
     rol: profile?.rol ?? "tecnico",
   });
 
+  const centrosBusquedaAviso = useMemo(() => {
+    if (centroParamFiltro) return [centroParamFiltro];
+    if (alcanceOtGlobal) return [];
+    if (esTecnicoMulti) return [...centrosPerfil];
+    const c = (centrosPerfil[0] ?? DEFAULT_CENTRO).trim();
+    return c ? [c] : [];
+  }, [centroParamFiltro, alcanceOtGlobal, esTecnicoMulti, centrosPerfil]);
+
+  const { workOrderId: otIdDesdeAvisoParam, loading: buscandoOtPorAviso } = useWorkOrderIdPorAvisoBusqueda({
+    avisoNumero: avisoParam,
+    centros: centrosBusquedaAviso,
+    buscarEnTodasLasPlantas: alcanceOtGlobal && !centroParamFiltro,
+    enabled: Boolean(avisoParam) && !authLoading && Boolean(profile) && !esCliente,
+  });
+
   const otsFiltradas = useMemo(() => {
-    if (!soloOrdenPreviaSap) return ots;
-    return ots.filter((o) => Boolean(o.alerta_cerrar_para_aviso_sap?.n_aviso?.trim()));
-  }, [ots, soloOrdenPreviaSap]);
+    let list = ots;
+    if (soloOrdenPreviaSap) {
+      list = list.filter((o) => Boolean(o.alerta_cerrar_para_aviso_sap?.n_aviso?.trim()));
+    }
+    if (avisoParam) {
+      list = list.filter((o) => coincideOtConNumeroAviso(o, avisoParam));
+    }
+    return list;
+  }, [ots, soloOrdenPreviaSap, avisoParam]);
+
+  useEffect(() => {
+    if (!avisoParam || buscandoOtPorAviso) return;
+    if (otIdDesdeAvisoParam) {
+      router.replace(`/tareas/${encodeURIComponent(otIdDesdeAvisoParam)}`);
+      return;
+    }
+    if (!loading && otsFiltradas.length === 1) {
+      router.replace(`/tareas/${encodeURIComponent(otsFiltradas[0]!.id)}`);
+    }
+  }, [avisoParam, buscandoOtPorAviso, otIdDesdeAvisoParam, loading, otsFiltradas, router]);
+
+  const hrefSinFiltroAviso = useMemo(() => {
+    const p = new URLSearchParams(searchParams.toString());
+    p.delete("aviso");
+    const q = p.toString();
+    return q ? `/tareas?${q}` : "/tareas";
+  }, [searchParams]);
 
   const { primaryTitle, primaryList, correctivos } = useMemo(() => {
     const checklist = otsFiltradas.filter((o) => workOrderSubtipo(o) === "checklist");
@@ -498,6 +540,38 @@ export function TareasPageClient() {
           </span>
         </label>
       </div>
+
+      {avisoParam ? (
+        <p className="rounded-md border border-blue-300/50 bg-blue-50 px-3 py-2 text-sm text-blue-950 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-100">
+          {buscandoOtPorAviso ? (
+            <>
+              Buscando la orden del aviso <span className="font-mono font-semibold">{avisoParam}</span> en el
+              sistema…
+            </>
+          ) : otIdDesdeAvisoParam ? (
+            <>
+              Orden encontrada para el aviso <span className="font-mono font-semibold">{avisoParam}</span>. Abriendo
+              detalle…
+            </>
+          ) : !loading && otsFiltradas.length === 0 ? (
+            <>
+              No hay órdenes de trabajo en el sistema para el aviso{" "}
+              <span className="font-mono font-semibold">{avisoParam}</span>. Es probable que el aviso esté cerrado solo
+              en el maestro (SAP / importación) sin OT registrada acá.{" "}
+              <Link href={hrefSinFiltroAviso} className="font-medium underline underline-offset-2">
+                Ver todas las órdenes
+              </Link>
+            </>
+          ) : (
+            <>
+              Mostrando órdenes del aviso <span className="font-mono font-semibold">{avisoParam}</span>.{" "}
+              <Link href={hrefSinFiltroAviso} className="font-medium underline underline-offset-2">
+                Quitar filtro
+              </Link>
+            </>
+          )}
+        </p>
+      ) : null}
 
       {loading ? <p className="text-sm text-zinc-600">Cargando…</p> : null}
       {error ? (

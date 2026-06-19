@@ -887,10 +887,11 @@ export function ReporteCumplimientoClient() {
           ) : null}
 
           <p className="rounded-md border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
-            <strong>Operativo</strong>: preventivos cerrados en el mes (sin meta).{" "}
+            <strong>Operativo</strong>: preventivos cerrados en el mes (fecha_fin_ejecucion).{" "}
             <strong>Certificación</strong>: promedio mensual/trim/sem/anual por especialidad vs
-            objetivos contractuales. <strong>Detalle OT</strong>: universo legacy (OT con fecha
-            programada en el mes). Exportar Excel incluye ambos criterios.
+            objetivos contractuales. <strong>Detalle OT</strong>: programadas en el mes (sin OT ya
+            cerradas en meses previos). El Excel incluye también las cerradas en el mes aunque su
+            programación sea de otro mes.
           </p>
         </div>
       ) : !loading ? (

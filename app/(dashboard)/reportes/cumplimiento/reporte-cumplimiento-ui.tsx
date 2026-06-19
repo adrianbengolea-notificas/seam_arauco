@@ -14,9 +14,10 @@ export const DISC_LABELS: Record<DisciplinaLabel, string> = {
 };
 
 export const DISC_COLOR: Record<DisciplinaLabel, string> = {
-  AA: "text-blue-700 bg-blue-50 border-blue-200",
-  ELECTRICO: "text-amber-700 bg-amber-50 border-amber-200",
-  GG: "text-green-700 bg-green-50 border-green-200",
+  AA: "text-blue-800 bg-blue-50 border-blue-200 dark:text-blue-100 dark:bg-blue-950/50 dark:border-blue-800",
+  ELECTRICO:
+    "text-amber-800 bg-amber-50 border-amber-200 dark:text-amber-100 dark:bg-amber-950/50 dark:border-amber-800",
+  GG: "text-green-800 bg-green-50 border-green-200 dark:text-green-100 dark:bg-green-950/50 dark:border-green-800",
 };
 
 export function pctBadge(pct: number) {
@@ -129,10 +130,10 @@ export function CertificacionPanel({ data }: { data: ReporteCumplimientoData }) 
           return (
             <Card key={d} className={`border ${DISC_COLOR[d]}`}>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold">{DISC_LABELS[d]}</CardTitle>
-                <CardDescription className="font-mono text-xs">
-                  Especialidad: {Math.round(c.pct_especialidad * 100)}% (prom. 4 niveles)
-                </CardDescription>
+                <CardTitle className="text-sm font-semibold [color:inherit]">
+                  {DISC_LABELS[d]}: {Math.round(c.pct_especialidad * 100)}%{" "}
+                  <span className="font-normal opacity-80">(prom. 4 niveles)</span>
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-xs">
                 <div className="flex justify-between gap-2">

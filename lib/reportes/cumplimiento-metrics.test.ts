@@ -5,6 +5,7 @@ import {
   esOtCerradaEnPeriodo,
   formulaPctText,
   mergeDiscMap,
+  otCerradaAntesDelMesReporte,
 } from "@/lib/reportes/cumplimiento-metrics";
 
 describe("cumplimiento-metrics", () => {
@@ -39,6 +40,13 @@ describe("cumplimiento-metrics", () => {
 
   it("formulaPctText", () => {
     expect(formulaPctText(108, 120)).toBe("108 / 120 = 90%");
+  });
+
+  it("otCerradaAntesDelMesReporte detecta cierre en mes anterior", () => {
+    const cierreAbril = { toMillis: () => Date.UTC(2026, 3, 15, 15, 0, 0) };
+    expect(otCerradaAntesDelMesReporte("CERRADA", cierreAbril, 2026, 6)).toBe(true);
+    expect(otCerradaAntesDelMesReporte("CERRADA", cierreAbril, 2026, 4)).toBe(false);
+    expect(otCerradaAntesDelMesReporte("ABIERTA", cierreAbril, 2026, 6)).toBe(false);
   });
 
   it("esOtCerradaEnPeriodo exige CERRADA y fecha_fin en el mes", () => {

@@ -11,10 +11,10 @@ import {
   calcularTotalesPreventivo,
   emptyDiscMap,
   esDisciplina,
-  esOtCerradaEnPeriodo,
   finalizarDiscMap,
   mergeDiscMap,
   normalizarEsp,
+  otCerradaAntesDelMesReporte,
   sitioDesdeUt,
   timestampToMillis,
   type CentroResumen,
@@ -41,6 +41,12 @@ import {
   type EjecutadosCertificacion,
   type MetasCertificacion,
 } from "@/lib/reportes/certificacion-objetivos";
+import {
+  formatFechaReporteAR,
+  inicioAnioArgentinaMs,
+  msEnMesReporte,
+  rangeMesReporte,
+} from "@/lib/reportes/periodo-reporte";
 import { Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 
@@ -57,18 +63,20 @@ const MESES_ES = [
 function tsToDateStr(ts: FirebaseFirestore.Timestamp | null | undefined): string | null {
   if (!ts) return null;
   try {
-    return ts.toDate().toLocaleDateString("es-AR", {
-      day: "2-digit", month: "2-digit", year: "numeric",
-    });
+    const ms = timestampToMillis(ts);
+    if (ms == null) return null;
+    return formatFechaReporteAR(ms);
   } catch {
     return null;
   }
 }
 
 function rangeMes(año: number, mes: number): { inicio: Timestamp; fin: Timestamp } {
-  const inicio = Timestamp.fromDate(new Date(año, mes - 1, 1, 0, 0, 0));
-  const fin = Timestamp.fromDate(new Date(año, mes, 1, 0, 0, 0));
-  return { inicio, fin };
+  const { inicioMs, finMs } = rangeMesReporte(año, mes);
+  return {
+    inicio: Timestamp.fromMillis(inicioMs),
+    fin: Timestamp.fromMillis(finMs),
+  };
 }
 
 function emptyPorEspecialidadCorrectivos(): CorrectivosPorEspecialidad {
@@ -115,6 +123,8 @@ async function cargarMetasCertificacion(
 
 function contarPreventivosCerrados(
   docs: FirebaseFirestore.QueryDocumentSnapshot[],
+  año: number,
+  mes: number,
   inicioMs: number,
   finMs: number,
   inicioTrimMs: number,
@@ -141,7 +151,7 @@ function contarPreventivosCerrados(
     });
 
     const bucket = out[esp];
-    const enMes = finOtMs >= inicioMs && finOtMs < finMs;
+    const enMes = msEnMesReporte(finOtMs, año, mes);
 
     if (enMes) {
       bucket.totalMes++;
@@ -258,7 +268,7 @@ async function calcularCentro(
   operativo: OperativoReporte;
   certificacion: CertificacionReporte;
 }> {
-  const inicioAño = Timestamp.fromDate(new Date(año, 0, 1, 0, 0, 0));
+  const inicioAño = Timestamp.fromMillis(inicioAnioArgentinaMs(año));
   const [prevSnap, prevCerradosSnap, corrCerradosSnap, corrCreadosSnap] = await Promise.all([
     db
       .collection(COLLECTIONS.work_orders)
@@ -301,6 +311,8 @@ async function calcularCentro(
 
   const ejecutadosCert = contarPreventivosCerrados(
     prevCerradosSnap.docs,
+    año,
+    mes,
     inicioMs,
     finMs,
     inicioTrimMs,
@@ -314,10 +326,15 @@ async function calcularCentro(
     const d = doc.data() as Record<string, unknown>;
     if (d.archivada === true) continue;
     if (!esPreventivoPuro(d.tipo_trabajo)) continue;
+    if (otCerradaAntesDelMesReporte(d.estado, d.fecha_fin_ejecucion, año, mes)) continue;
 
     const esp = normalizarEsp(String(d.especialidad ?? ""));
     const sitio = sitioDesdeUt(d.ubicacion_tecnica as string | undefined);
-    const ejecutada = esOtCerradaEnPeriodo(d.estado, d.fecha_fin_ejecucion, inicioMs, finMs);
+    const finOtMsPrev = timestampToMillis(d.fecha_fin_ejecucion);
+    const ejecutada =
+      d.estado === "CERRADA" &&
+      finOtMsPrev != null &&
+      msEnMesReporte(finOtMsPrev, año, mes);
     const fechaCierreStr = tsToDateStr(
       d.fecha_fin_ejecucion as FirebaseFirestore.Timestamp | null,
     );
@@ -349,6 +366,42 @@ async function calcularCentro(
         fecha_ejecucion: fechaCierreStr,
         fecha_creacion: tsToDateStr(d.created_at as FirebaseFirestore.Timestamp) ?? "",
       });
+    }
+  }
+
+  // Cerradas en el mes pero programadas en otro mes → operativo sí, prevSnap no las trae
+  const otsDetalleNOt = new Set(otsDetalle.map((o) => o.n_ot).filter(Boolean));
+  for (const doc of prevCerradosSnap.docs) {
+    const d = doc.data() as Record<string, unknown>;
+    if (d.archivada === true) continue;
+    if (!esPreventivoPuro(d.tipo_trabajo)) continue;
+    if (d.estado !== "CERRADA") continue;
+    const finOtMs = timestampToMillis(d.fecha_fin_ejecucion);
+    if (finOtMs == null || !msEnMesReporte(finOtMs, año, mes)) continue;
+    const nOt = String(d.n_ot ?? "");
+    if (nOt && otsDetalleNOt.has(nOt)) continue;
+
+    const esp = normalizarEsp(String(d.especialidad ?? ""));
+    const sitio = sitioDesdeUt(d.ubicacion_tecnica as string | undefined);
+    if (incluirDetalle) {
+      otsDetalle.push({
+        n_ot: nOt,
+        aviso_numero: String(d.aviso_numero ?? ""),
+        descripcion: String(d.texto_trabajo ?? ""),
+        especialidad: esp,
+        frecuencia: String(d.frecuencia_plan_mtsa ?? d.frecuencia ?? ""),
+        ubicacion: String(d.ubicacion_tecnica ?? ""),
+        sitio,
+        estado: String(d.estado ?? ""),
+        tipo: "preventivo",
+        planificada: false,
+        ejecutada: true,
+        fecha_ejecucion: tsToDateStr(
+          d.fecha_fin_ejecucion as FirebaseFirestore.Timestamp | null,
+        ),
+        fecha_creacion: tsToDateStr(d.created_at as FirebaseFirestore.Timestamp) ?? "",
+      });
+      if (nOt) otsDetalleNOt.add(nOt);
     }
   }
 
@@ -392,6 +445,8 @@ async function calcularCentro(
   for (const doc of corrCerradosSnap.docs) {
     const d = doc.data() as Record<string, unknown>;
     if (d.archivada === true) continue;
+    const finOtMs = timestampToMillis(d.fecha_fin_ejecucion);
+    if (finOtMs == null || !msEnMesReporte(finOtMs, año, mes)) continue;
     const sitio = sitioDesdeUt(d.ubicacion_tecnica as string | undefined);
     const esp = normalizarEsp(String(d.especialidad ?? ""));
     const tienAviso = Boolean(d.aviso_id || d.aviso_numero);
@@ -405,9 +460,8 @@ async function calcularCentro(
   for (const doc of corrCreadosSnap.docs) {
     const d = doc.data() as Record<string, unknown>;
     if (d.archivada === true) continue;
-    if (
-      esOtCerradaEnPeriodo(d.estado, d.fecha_fin_ejecucion, inicioMs, finMs)
-    ) {
+    const finOtMs = timestampToMillis(d.fecha_fin_ejecucion);
+    if (d.estado === "CERRADA" && finOtMs != null && msEnMesReporte(finOtMs, año, mes)) {
       continue;
     }
     const sitio = sitioDesdeUt(d.ubicacion_tecnica as string | undefined);

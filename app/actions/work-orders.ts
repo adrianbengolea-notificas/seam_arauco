@@ -646,3 +646,44 @@ export async function actionUpdateWorkOrderInforme(
     });
   });
 }
+
+const buscarOtPorAvisoSchema = z.object({
+  avisoNumero: z.string().min(1),
+  avisoDocId: z.string().optional(),
+  centros: z.array(z.string()).optional(),
+});
+
+/** Resuelve id de OT por número de aviso (incluye archivadas y vínculos rotos). */
+export async function actionBuscarWorkOrderIdPorAviso(
+  idToken: string,
+  input: z.infer<typeof buscarOtPorAvisoSchema>,
+): Promise<ActionResult<{ workOrderId: string | null }>> {
+  return wrap(async () => {
+    const session = await requireVerifiedProfileFromToken(idToken);
+    const parsed = buscarOtPorAvisoSchema.parse(input);
+    const { buscarWorkOrderIdPorAvisoAdmin } = await import(
+      "@/modules/work-orders/buscar-work-order-id-por-aviso-admin"
+    );
+    const { KNOWN_CENTROS } = await import("@/lib/config/app-config");
+    const { centrosEfectivosDelUsuario } = await import("@/modules/users/centros-usuario");
+    const { tienePermiso, toPermisoRol } = await import("@/lib/permisos/index");
+
+    const rol = toPermisoRol(session.rol);
+    const centrosUsuario = centrosEfectivosDelUsuario(session);
+    const centros =
+      parsed.centros?.length
+        ? parsed.centros
+        : tienePermiso(rol, "ot:ver_todas")
+          ? [...KNOWN_CENTROS]
+          : centrosUsuario;
+
+    const workOrderId = await buscarWorkOrderIdPorAvisoAdmin({
+      avisoDocId: parsed.avisoDocId,
+      avisoNumero: parsed.avisoNumero,
+      centros,
+      profile: session,
+      uid: session.uid,
+    });
+    return { workOrderId: workOrderId ?? null };
+  });
+}

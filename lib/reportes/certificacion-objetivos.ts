@@ -4,6 +4,10 @@
  */
 
 import type { DisciplinaLabel } from "@/lib/reportes/cumplimiento-metrics";
+import {
+  inicioSemestreArgentinaMs,
+  inicioTrimestreArgentinaMs,
+} from "@/lib/reportes/periodo-reporte";
 
 export type TierFrecuencia = "M" | "T" | "S" | "A";
 
@@ -129,13 +133,11 @@ export function planAcumuladoEnPeriodo(
 }
 
 export function inicioTrimestreMs(año: number, mes: number): number {
-  const mesInicio = Math.floor((mes - 1) / 3) * 3 + 1;
-  return Date.UTC(año, mesInicio - 1, 1);
+  return inicioTrimestreArgentinaMs(año, mes);
 }
 
 export function inicioSemestreMs(año: number, mes: number): number {
-  const mesInicio = mes <= 6 ? 1 : 7;
-  return Date.UTC(año, mesInicio - 1, 1);
+  return inicioSemestreArgentinaMs(año, mes);
 }
 
 function ratioCert(ejecutados: number, plan: number): number {

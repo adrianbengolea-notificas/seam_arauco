@@ -65,6 +65,16 @@ const firestoreDatabaseId =
   process.env.NEXT_PUBLIC_FIREBASE_FIRESTORE_DATABASE_ID?.trim() ?? "";
 
 const nextConfig: NextConfig = {
+  // Evita medición de performance rota en dev (Turbopack) cuando un page hace redirect() sin renderizar.
+  async redirects() {
+    return [
+      {
+        source: "/",
+        destination: "/dashboard",
+        permanent: false,
+      },
+    ];
+  },
   // Evita que Turbopack infiera la raíz como `app/` (no resuelve `next` package en algunos entornos).
   turbopack: {
     root: projectRoot,

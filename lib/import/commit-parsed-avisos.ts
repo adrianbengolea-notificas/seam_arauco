@@ -18,7 +18,7 @@ import {
   normalizeNAvisoCompare,
   preferredNumericAvisoId,
 } from "@/lib/import/aviso-numero-canonical";
-import { especialidadImportToDominio } from "@/lib/import/normalize-values";
+import { especialidadExplicitaDesdeTexto, especialidadImportToDominio } from "@/lib/import/normalize-values";
 import type { ModoImportacionAvisos } from "@/lib/import/modo-importacion";
 import type { ParsedAvisoRow } from "@/lib/import/parse-avisos-excel";
 import { reconcileAntecesorTrasImportar } from "@/lib/mantenimiento/antecesor-orden-admin";
@@ -255,12 +255,16 @@ function especialidadRespetandoGgEnFirestoreVariants(
   if (especialidadPredeterminadaActivo && especialidadPredeterminadaActivo !== "GG") {
     return espCalculada;
   }
+  if (especialidadPredeterminadaActivo === "GG") {
+    return "GG";
+  }
   let sawGg = false;
   for (const id of candidateAvisoDocIds(numero)) {
     if (existentePorId.get(id) === "GG") sawGg = true;
   }
   if (!sawGg) return espCalculada;
-  if (espCalculada === "AA" || espCalculada === "ELECTRICO") return "GG";
+  // Historial GG ambiguo: no forzar GG si el import actual trae AA/E explícitos.
+  if (espCalculada === "AA" || espCalculada === "ELECTRICO") return espCalculada;
   return espCalculada;
 }
 
@@ -578,7 +582,8 @@ export async function commitParsedAvisoRows(input: {
     }
 
     if (assetId) {
-      esp = especialidadConPreferenciaCatalogoGg(assetId, esp, especialidadPredeterminadaByAssetId);
+      const espExplicita = especialidadExplicitaDesdeTexto(descripcion);
+      esp = espExplicita ?? especialidadConPreferenciaCatalogoGg(assetId, esp, especialidadPredeterminadaByAssetId);
     }
 
     const assetPred = assetId ? especialidadPredeterminadaByAssetId.get(assetId) : undefined;
@@ -750,7 +755,8 @@ async function commitListadoSemestralAnual(
       assetId = `ee-gral-${centro.toLowerCase()}`;
     }
     if (assetId) {
-      esp = especialidadConPreferenciaCatalogoGg(assetId, esp, especialidadPredeterminadaByAssetId);
+      const espExplicita = especialidadExplicitaDesdeTexto(descripcion);
+      esp = espExplicita ?? especialidadConPreferenciaCatalogoGg(assetId, esp, especialidadPredeterminadaByAssetId);
     }
 
     const estadoPatch: Record<string, unknown> = {};

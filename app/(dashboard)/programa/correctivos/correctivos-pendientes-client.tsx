@@ -1,6 +1,7 @@
 "use client";
 
 import { ProgramaSeccionNav } from "@/app/(dashboard)/programa/programa-seccion-nav";
+import { PasoImportacionAvisos } from "@/components/importacion/paso-importacion-avisos";
 import { actionAddAvisoToProgramaPublicado } from "@/app/actions/schedule";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,6 +65,7 @@ export function CorrectivosPendientesClient() {
   const { profile } = useUserProfile(user?.uid);
   const { puede, rol } = usePermisos();
   const puedeActuar = puede("programa:crear_ot") || puede("programa:editar");
+  const puedeImportar = puede("admin:cargar_programa");
   const superadmin = isSuperAdminRole(profile?.rol);
   const centroPerfil = (profile?.centro?.trim() || DEFAULT_CENTRO).trim();
   const [centroF, setCentroF] = useState("");
@@ -75,6 +77,7 @@ export function CorrectivosPendientesClient() {
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [fechaRealizacion, setFechaRealizacion] = useState(() => format(new Date(), "yyyy-MM-dd"));
   const [busy, setBusy] = useState(false);
+  const [importOk, setImportOk] = useState<string | null>(null);
 
   const { avisos, loading, error } = useAvisosCorrectivosPendientes({
     authUid: user?.uid,
@@ -177,24 +180,39 @@ export function CorrectivosPendientesClient() {
       <header className="space-y-1">
         <h1 className="text-2xl font-bold tracking-tight">Correctivos</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
-          Avisos de rotura (Excel). Con <strong className="text-foreground">fecha de realización</strong> pasan al
-          calendario de esa semana — vía OT o con <strong className="text-foreground">Ubicar en calendario</strong>.
+          Importá la planilla semanal, revisá el listado y ubicá cada aviso en el calendario — con OT o con{" "}
+          <strong className="text-foreground">Ubicar en calendario</strong> (fecha de realización obligatoria).
         </p>
-        <p className="text-xs text-muted-foreground">
-          <Link
-            href="/superadmin/configuracion?tab=importacion"
-            className="text-primary underline underline-offset-2"
-          >
-            Importar Excel
-          </Link>
-          {cuentaSinOt > 0 ? (
-            <>
-              {" "}
-              · {cuentaSinOt} sin OT
-            </>
-          ) : null}
-        </p>
+        {cuentaSinOt > 0 ? (
+          <p className="text-xs text-muted-foreground">{cuentaSinOt} sin OT</p>
+        ) : null}
       </header>
+
+      {puedeImportar ? (
+        <section className="space-y-3 rounded-xl border border-border bg-card p-4">
+          <h2 className="text-sm font-semibold text-foreground">Carga semanal (Excel)</h2>
+          <PasoImportacionAvisos
+            paso={1}
+            variant="correctivos"
+            tab="correctivos"
+            tituloArchivo="CORRECTIVOS-JUNIO 2026.xlsx (ejemplo)"
+            descripcionArchivo="Planilla semanal de roturas (correctivos). Columnas: N° DE AVISO · UBICACIÓN TÉCNICA · DESCRIPCIÓN · ESPECIALIDAD · FECHA REALIZACIÓN. No usa frecuencia M/T/S/A como los preventivos; el mes/año en el nombre del archivo es solo la convención de Arauco/SAP. El centro se detecta por prefijo de UT (PIRA→PT01, ESP→PC01…). Podés forzarlo si todos los avisos son del mismo centro."
+            user={user}
+            puedeImportar={puedeImportar}
+            onImportado={() => setImportOk("Importación aplicada. El listado se actualiza solo.")}
+          />
+          {importOk ? (
+            <p className="text-sm text-emerald-700 dark:text-emerald-300" role="status">
+              {importOk}
+            </p>
+          ) : null}
+        </section>
+      ) : (
+        <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+          Para importar Excel necesitás permiso <span className="font-mono">admin:cargar_programa</span>. Podés seguir
+          programando los avisos ya cargados abajo.
+        </p>
+      )}
 
       <div className="flex flex-wrap items-end gap-3">
         {superadmin ? (
@@ -307,10 +325,8 @@ export function CorrectivosPendientesClient() {
           </table>
           {!loading && filas.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-              No hay correctivos abiertos con estos filtros.{" "}
-              <Link href="/superadmin/configuracion?tab=importacion" className="text-primary underline">
-                Importar Excel
-              </Link>
+              No hay correctivos abiertos con estos filtros.
+              {puedeImportar ? " Importá la planilla semanal arriba." : null}
             </p>
           ) : null}
         </div>

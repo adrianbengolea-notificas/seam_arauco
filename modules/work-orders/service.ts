@@ -680,6 +680,10 @@ export async function createWorkOrderFromForm(input: {
   if (!cIn) {
     throw new AppError("VALIDATION", "Centro requerido");
   }
+  const tecnicoUid = input.tecnico_asignado_uid?.trim() ?? "";
+  if (!tecnicoUid) {
+    throw new AppError("VALIDATION", "Asigná un técnico de la planta antes de crear la orden.");
+  }
   const fueraCatalogoCorrectivo =
     input.sub_tipo === "correctivo" && input.activo_fuera_catalogo === true;
   const manualActivoTxt = fueraCatalogoCorrectivo ? (input.activo_manual_descripcion ?? "").trim() : "";
@@ -822,12 +826,8 @@ export async function createWorkOrderFromForm(input: {
       ...(aviso_numero ? { aviso_numero } : {}),
       ...(input.frecuencia_plan_mtsa ? { frecuencia_plan_mtsa: input.frecuencia_plan_mtsa } : {}),
       ...(denomUbicTrim ? { denom_ubic_tecnica: denomUbicTrim } : {}),
-      ...(input.tecnico_asignado_uid
-        ? {
-            tecnico_asignado_uid: input.tecnico_asignado_uid,
-            tecnico_asignado_nombre: input.tecnico_asignado_nombre ?? "",
-          }
-        : {}),
+      tecnico_asignado_uid: tecnicoUid,
+      tecnico_asignado_nombre: input.tecnico_asignado_nombre?.trim() ?? "",
       ...(provisorioFlag ? { provisorio_sin_aviso_sap: true } : {}),
     };
 

@@ -18,6 +18,7 @@ export function TecnicoSelectParaOt({
   disabled,
   id,
   className,
+  required = false,
 }: {
   centro: string;
   valueUid: string;
@@ -25,6 +26,8 @@ export function TecnicoSelectParaOt({
   disabled?: boolean;
   id?: string;
   className?: string;
+  /** Si true, no permite dejar la OT sin técnico (p. ej. alta manual). */
+  required?: boolean;
 }) {
   const [opts, setOpts] = useState<Opt[]>([]);
   const [loading, setLoading] = useState(false);
@@ -73,7 +76,9 @@ export function TecnicoSelectParaOt({
         }
         value={valueInList ? valueNorm : "__unknown__"}
         disabled={disabled || loading || !centro.trim()}
+        required={required}
         aria-busy={loading}
+        aria-required={required || undefined}
         onChange={(e) => {
           const v = e.target.value;
           if (v === "__unknown__") return;
@@ -90,7 +95,9 @@ export function TecnicoSelectParaOt({
             Asignado (uid no listado)…
           </option>
         ) : null}
-        <option value="">Sin técnico aún (equipo de esta planta)</option>
+        <option value="" disabled={required}>
+          {required ? "Seleccioná un técnico…" : "Sin técnico aún (equipo de esta planta)"}
+        </option>
         {opts.map((o) => (
           <option key={o.uid} value={o.uid}>
             {o.display_name}

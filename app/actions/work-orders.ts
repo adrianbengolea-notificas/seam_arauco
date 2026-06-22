@@ -369,6 +369,14 @@ const createWorkOrderSchema = z
         });
       }
     }
+
+    if (!(data.tecnico_asignado_uid ?? "").trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Asigná un técnico de la planta antes de crear la orden.",
+        path: ["tecnico_asignado_uid"],
+      });
+    }
   });
 
 export async function createWorkOrder(

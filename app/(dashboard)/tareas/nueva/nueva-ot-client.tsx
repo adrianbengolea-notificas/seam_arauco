@@ -450,6 +450,10 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
         setMsg("Indicá la fecha de realización para ubicar el correctivo en el programa semanal.");
         return;
       }
+      if (!tecnicoUid.trim()) {
+        setMsg("Seleccioná un técnico de la planta antes de crear la orden.");
+        return;
+      }
       const res = await createWorkOrder(token, {
         centro,
         asset_id: esOtroCorrectivo ? "" : assetId.trim(),
@@ -815,22 +819,22 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
 
         <div className="space-y-1">
           <label className="text-sm font-medium" htmlFor="nueva-ot-tecnico">
-            Técnico asignado <span className="text-muted-foreground font-normal">(opcional)</span>
+            Técnico asignado <span className="text-destructive font-normal">*</span>
           </label>
           <TecnicoSelectParaOt
             id="nueva-ot-tecnico"
             centro={centro}
             valueUid={tecnicoUid}
             disabled={busy}
+            required
             onValueChange={(uid, nombre) => {
               setTecnicoUid(uid);
               setTecnicoNombre(nombre);
             }}
           />
           <p className="text-xs text-muted-foreground">
-            Es distinto del campo <span className="font-medium text-foreground">Centro</span> del formulario: acá elegís si
-            ya hay una persona a cargo de la tarea. Si dejás “Sin técnico aún…”, la planta no cambia; la orden la pueden
-            ver y tomar los técnicos con permiso en esa misma planta.
+            Obligatorio: elegí quién ejecuta la tarea para que la orden aparezca en su panel. Puede ser cualquier técnico
+            activo de la planta <span className="font-medium text-foreground">{nombreCentro(centro)}</span>.
           </p>
         </div>
 
@@ -887,7 +891,7 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
         {msg ? <p className="text-sm text-red-600">{msg}</p> : null}
 
         <div className="flex flex-wrap gap-2">
-          <Button type="submit" disabled={busy || !!conflictoActivoCentro || (assetDocLoading && !!assetId.trim() && assetId !== ASSET_OTRO_FUERA_CATALOGO)}>
+          <Button type="submit" disabled={busy || !tecnicoUid.trim() || !!conflictoActivoCentro || (assetDocLoading && !!assetId.trim() && assetId !== ASSET_OTRO_FUERA_CATALOGO)}>
             {busy ? "Guardando…" : "Crear orden de trabajo (OT)"}
           </Button>
           <Button type="button" variant="outline" asChild>

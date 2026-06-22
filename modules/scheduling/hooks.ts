@@ -726,7 +726,10 @@ export function useSemanasDisponiblesTodas(
   options?: Pick<
     UseSemanasDisponiblesOptions,
     "incluirOtProgramadasSemana" | "incluirPropuestasMotorSemana" | "otSemanasSoloEspecialidades"
-  >,
+  > & {
+    /** Si se indica, solo considera esas plantas (p. ej. centros del perfil de un técnico multi-planta). */
+    centrosScope?: readonly string[];
+  },
 ): {
   semanas: MergedSemanaOpcion[];
   loading: boolean;
@@ -735,6 +738,15 @@ export function useSemanasDisponiblesTodas(
   const incluirOtProg = options?.incluirOtProgramadasSemana ?? true;
   const incluirPropuesta = Boolean(options?.incluirPropuestasMotorSemana);
   const otSemanasSoloEspKey = (options?.otSemanasSoloEspecialidades ?? []).join("\0");
+  const centrosScopeKey = (options?.centrosScope ?? []).join("\0");
+
+  const centrosActivos = useMemo(() => {
+    const base = centrosListaConocidosNormalizados();
+    const scope = options?.centrosScope;
+    if (!scope?.length) return base;
+    const allowed = new Set(scope.map((c) => c.trim()).filter(Boolean));
+    return base.filter((c) => allowed.has(c));
+  }, [centrosScopeKey]);
 
   const [programaPorCentro, setProgramaPorCentro] = useState<Record<string, SemanaOpcion[]>>({});
   const [otPorCentro, setOtPorCentro] = useState<Record<string, string[]>>({});
@@ -752,7 +764,7 @@ export function useSemanasDisponiblesTodas(
       if (t.length > cur.label.length) cur.label = t;
     }
 
-    for (const centro of KNOWN_CENTROS) {
+    for (const centro of centrosActivos) {
       const pl = programaPorCentro[centro] ?? [];
       const byProgIso = new Map<string, SemanaOpcion>();
       for (const item of pl) {
@@ -811,7 +823,7 @@ export function useSemanasDisponiblesTodas(
       }))
       .sort((a, b) => b.iso.localeCompare(a.iso));
     return list;
-  }, [programaPorCentro, otPorCentro, propPorCentro]);
+  }, [programaPorCentro, otPorCentro, propPorCentro, centrosActivos]);
 
   const loading = loadingProg || loadingOt || loadingProp;
 
@@ -829,7 +841,7 @@ export function useSemanasDisponiblesTodas(
 
     let cancelled = false;
     const unsubs: Unsubscribe[] = [];
-    const centrosList = centrosListaConocidosNormalizados();
+    const centrosList = centrosActivos;
     const centroSet = new Set(centrosList);
     const progChunks = chunkArray(centrosList, FIRESTORE_IN_QUERY_MAX).filter((ch) => ch.length > 0);
     const propChunks = chunkArray(centrosList, FIRESTORE_IN_QUERY_MAX).filter((ch) => ch.length > 0);
@@ -1047,7 +1059,7 @@ export function useSemanasDisponiblesTodas(
       cancelled = true;
       unsubs.forEach((u) => u());
     };
-  }, [authUid, incluirOtProg, incluirPropuesta, otSemanasSoloEspKey]);
+  }, [authUid, incluirOtProg, incluirPropuesta, otSemanasSoloEspKey, centrosScopeKey, centrosActivos]);
 
   return { semanas: merged, loading, error };
 }

@@ -1021,8 +1021,14 @@ function SelectorPlantaTecnico({
   onChange: (centro: string) => void;
   disabled?: boolean;
 }) {
-  const opciones = centros.length ? centros : [value].filter(Boolean);
-  const selectValue = opciones.includes(value) ? value : (opciones[0] ?? value);
+  const incluyeTodas = centros.length > 1;
+  const opcionesCentro = centros.length ? centros : [value].filter(Boolean);
+  const selectValue =
+    value === CENTRO_SELECTOR_TODAS_PLANTAS && incluyeTodas
+      ? CENTRO_SELECTOR_TODAS_PLANTAS
+      : opcionesCentro.includes(value)
+        ? value
+        : (opcionesCentro[0] ?? value);
 
   return (
     <label className="flex min-w-[10rem] flex-1 flex-col gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -1033,7 +1039,10 @@ function SelectorPlantaTecnico({
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
       >
-        {opciones.map((c) => (
+        {incluyeTodas ? (
+          <option value={CENTRO_SELECTOR_TODAS_PLANTAS}>Todas las plantas</option>
+        ) : null}
+        {opcionesCentro.map((c) => (
           <option key={c} value={c}>
             {nombreCentro(c)}
           </option>
@@ -1696,10 +1705,13 @@ export function ProgramaClient() {
   /** Selector «Planta / Todas las plantas» en programa publicado (lectura multi-planta). */
   const viewerEligeAlcanceMultiPlanta =
     viewerSuperadmin || esCliente || rol === "admin" || rol === "supervisor";
+  /** Incluye técnicos con más de una planta en el perfil (alcance acotado a sus centros). */
+  const alcanceMultiPlantaEnPrograma = viewerEligeAlcanceMultiPlanta || esTecnicoMultiCentro;
   const centroParam = searchParams.get("centro")?.trim() ?? "";
 
   const centroDesdeUrl = useMemo(() => {
     if (esTecnicoMultiCentro) {
+      if (centroParam === CENTRO_SELECTOR_TODAS_PLANTAS) return CENTRO_SELECTOR_TODAS_PLANTAS;
       if (centroParam && centrosPerfil.includes(centroParam)) return centroParam;
       if (centrosPerfil.includes(perfilCentro)) return perfilCentro;
       return centrosPerfil[0] ?? perfilCentro;
@@ -1729,6 +1741,7 @@ export function ProgramaClient() {
   useEffect(() => {
     if (authLoading) return;
     if (esTecnicoMultiCentro) {
+      if (centroParam === CENTRO_SELECTOR_TODAS_PLANTAS) return;
       if (centroParam && centrosPerfil.includes(centroParam)) return;
       const p = new URLSearchParams(searchParams.toString());
       const def = centrosPerfil.includes(perfilCentro) ? perfilCentro : (centrosPerfil[0] ?? perfilCentro);
@@ -1748,9 +1761,11 @@ export function ProgramaClient() {
   const onCentroProgramaChange = useCallback(
     (nextCentro: string) => {
       const centroValido = esTecnicoMultiCentro
-        ? centrosPerfil.includes(nextCentro)
-          ? nextCentro
-          : (centrosPerfil.includes(perfilCentro) ? perfilCentro : (centrosPerfil[0] ?? perfilCentro))
+        ? nextCentro === CENTRO_SELECTOR_TODAS_PLANTAS
+          ? CENTRO_SELECTOR_TODAS_PLANTAS
+          : centrosPerfil.includes(nextCentro)
+            ? nextCentro
+            : (centrosPerfil.includes(perfilCentro) ? perfilCentro : (centrosPerfil[0] ?? perfilCentro))
         : nextCentro === CENTRO_SELECTOR_TODAS_PLANTAS
           ? CENTRO_SELECTOR_TODAS_PLANTAS
           : isCentroInKnownList(nextCentro)
@@ -1806,7 +1821,9 @@ export function ProgramaClient() {
 
   const { semanas: semanasTodas, loading: semanasLoadingTodas, error: semanasErrorTodas } = useSemanasDisponiblesTodas(
     vistaTodasPlantas ? user?.uid : undefined,
-    opcionesSemanasDisponibles,
+    esTecnicoMultiCentro
+      ? { ...opcionesSemanasDisponibles, centrosScope: centrosPerfil }
+      : opcionesSemanasDisponibles,
   );
 
   const { semanas: semanasDrawerAlcance } = useSemanasDisponibles(
@@ -1983,8 +2000,11 @@ export function ProgramaClient() {
     if (!vistaTodasPlantas || !semanaId) return undefined;
     const row = semanasTodas.find((s) => s.iso === semanaId);
     if (!row) return undefined;
-    return KNOWN_CENTROS.map((c) => row.programaDocIdPorCentro[c]).filter((id): id is string => Boolean(id?.trim()));
-  }, [vistaTodasPlantas, semanaId, semanasTodas]);
+    const centrosFusion = esTecnicoMultiCentro ? centrosPerfil : KNOWN_CENTROS;
+    return centrosFusion
+      .map((c) => row.programaDocIdPorCentro[c])
+      .filter((id): id is string => Boolean(id?.trim()));
+  }, [vistaTodasPlantas, semanaId, semanasTodas, esTecnicoMultiCentro, centrosPerfil]);
 
   const { programa: programaFusion, loading: programaLoadingFusion, error: programaErrorFusion } =
     useProgramaSemanaFusion(docIdsFusion, semanaId || undefined, vistaTodasPlantas ? user?.uid : undefined);
@@ -2380,7 +2400,7 @@ export function ProgramaClient() {
                   Esta vista usa el centro de tu perfil.
                   {esRolTecnico
                     ? esTecnicoMultiCentro
-                      ? " Elegí la planta arriba; ves el programa de tu especialidad (asignadas a vos o sin asignar), incluidas las completadas."
+                      ? " Elegí planta o «Todas las plantas» arriba; ves el programa de tu especialidad (asignadas a vos o sin asignar), incluidas las completadas."
                       : " Ves el programa de tu especialidad (asignadas a vos o sin asignar), incluidas las completadas, en cualquier semana del selector."
                     : null}
                 </p>
@@ -2489,7 +2509,7 @@ export function ProgramaClient() {
           <div className="min-w-0 flex flex-1 items-start gap-2">
             <div className="min-w-0 flex-1">
               <h1 className="text-2xl font-semibold tracking-tight">Programa de la semana</h1>
-              {viewerEligeAlcanceMultiPlanta ? (
+              {alcanceMultiPlantaEnPrograma ? (
                 <p className="mt-1 text-xs text-muted-foreground">
                   {vistaTodasPlantas
                     ? "Varias plantas en una sola tabla: cada fila empieza con el código de planta. Para arrastrar entre días, elegí una planta sola; desde el panel del aviso podés cambiar semana o día para la planta de ese aviso si tenés permiso."
@@ -2535,14 +2555,14 @@ export function ProgramaClient() {
             >
               <div className="block space-y-2 text-left">
                 <p>
-                  {vistaTodasPlantas && viewerEligeAlcanceMultiPlanta ? (
+                  {vistaTodasPlantas && alcanceMultiPlantaEnPrograma ? (
                     <>
                       <strong>Programa de la semana</strong> en modo <strong>Todas las plantas</strong> junta en una
                       tabla los planes <strong>ya publicados</strong> de cada centro que tenga datos para la semana ISO
                       elegida. Sirve para comparar cargas entre sitios. El <strong>maestro</strong> de avisos (Excel en
                       Configuración e importación) es independiente de esta vista.
                     </>
-                  ) : viewerEligeAlcanceMultiPlanta ? (
+                  ) : alcanceMultiPlantaEnPrograma ? (
                     <>
                       <strong>Programa de la semana</strong> es el <strong>plan ya publicado</strong> del centro que
                       elegís en <strong>Planta</strong>: avisos por día en la grilla. Es la referencia de campo; el{" "}
@@ -2557,14 +2577,14 @@ export function ProgramaClient() {
                   )}
                 </p>
                 <p className="text-muted-foreground">
-                  {vistaTodasPlantas && viewerEligeAlcanceMultiPlanta ? (
+                  {vistaTodasPlantas && alcanceMultiPlantaEnPrograma ? (
                     <>
                       En modo <strong>Todas las plantas</strong>, cada fila de la grilla corresponde a una localidad
                       (el dato lleva el <strong>código de planta</strong> para no mezclar sitios). En esta vista no podés{" "}
                       <strong>arrastrar</strong> ni usar <strong>Reprogramar</strong> en el panel: para eso elegí{" "}
                       <strong>una planta</strong> en el selector.
                     </>
-                  ) : viewerEligeAlcanceMultiPlanta ? (
+                  ) : alcanceMultiPlantaEnPrograma ? (
                     <>
                       El texto del aviso puede incluir otros códigos (equipo, ubicación…); la tabla sigue siendo solo del
                       centro que elegís en <strong>Planta</strong>.

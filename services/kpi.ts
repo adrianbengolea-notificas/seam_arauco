@@ -1,5 +1,8 @@
+import { esActivoSinteticoGeneral } from "@/lib/assets/synthetic-gral-asset";
 import type { WorkOrder } from "@/modules/work-orders/types";
 import type { TipoAviso } from "@/modules/notices/types";
+
+export { esActivoSinteticoElectricoGeneral } from "@/lib/assets/synthetic-gral-asset";
 
 /** Acepta Timestamp de Firestore, caché JSON `{ seconds, nanoseconds }`, fechas o epoch ms. */
 function firestoreLikeToMillis(v: unknown): number | null {
@@ -73,15 +76,6 @@ export function cumplimientoPreventivos(rows: WorkOrder[]): PreventivoBucket {
 
 export type CorrectivoPorEquipo = Record<string, number>;
 
-/**
- * Activo sintético «Eléctrico general» (`EE-GRAL`, id `ee-gral-{centro}`): agrupa OT sin UT en catálogo.
- * No debe dominar rankings del dashboard frente a equipos reales.
- */
-export function esActivoSinteticoElectricoGeneral(codigoActivo: string, assetId: string): boolean {
-  if (codigoActivo.trim().toUpperCase() === "EE-GRAL") return true;
-  return assetId.trim().toLowerCase().startsWith("ee-gral-");
-}
-
 export type CorrectivoEquipoFila = {
   /** Código de activo mostrado en listados (misma clave que el ranking histórico). */
   codigo: string;
@@ -101,7 +95,7 @@ export function correctivosPorEquipoFilas(
   const acc = new Map<string, { count: number; asset_id: string }>();
   for (const r of rows) {
     if (!tipos.has(r.tipo_trabajo)) continue;
-    if (esActivoSinteticoElectricoGeneral(r.codigo_activo_snapshot ?? "", r.asset_id)) continue;
+    if (esActivoSinteticoGeneral(r.codigo_activo_snapshot ?? "", r.asset_id)) continue;
     const key = (r.codigo_activo_snapshot || r.asset_id || "").trim() || "—";
     const cur = acc.get(key);
     if (cur) {
@@ -146,7 +140,7 @@ export function detectarReincidencias(
 
   for (const r of rows) {
     if (r.tipo_trabajo !== "CORRECTIVO" && r.tipo_trabajo !== "EMERGENCIA") continue;
-    if (esActivoSinteticoElectricoGeneral(r.codigo_activo_snapshot ?? "", r.asset_id)) continue;
+    if (esActivoSinteticoGeneral(r.codigo_activo_snapshot ?? "", r.asset_id)) continue;
     const t = firestoreLikeToMillis(r.created_at) ?? 0;
     if (t < desde) continue;
     const list = byAsset.get(r.asset_id) ?? [];

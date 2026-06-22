@@ -18,6 +18,8 @@
     "seed:sem-anual": "tsx scripts/seed/seed-sem-anual.ts",
     "seed:templates": "tsx scripts/seed/seed-templates.ts",
     "seed:ee-sintetico": "tsx scripts/seed/seed-activos-ee-sinteticos.ts",
+    "seed:aa-sintetico": "tsx scripts/seed/seed-activos-aa-sinteticos.ts",
+    "corregir:aa-gral": "tsx scripts/vincular-avisos-correctivos-aa-gral.ts",
     "seed:gg": "tsx scripts/seed/seed-activos-gg.ts",
     "deploy:functions": "firebase deploy --only functions"
   },

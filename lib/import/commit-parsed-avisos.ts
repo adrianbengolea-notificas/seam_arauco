@@ -1,6 +1,7 @@
 /**
  * Persistencia de filas ya parseadas (`parse-avisos-excel`) en Firestore (Admin SDK).
  */
+import { assetIdImportDesdeEspecialidad } from "@/lib/assets/synthetic-gral-asset";
 import { AppError } from "@/lib/errors/app-error";
 import { getAdminDb } from "@/firebase/firebaseAdmin";
 import { isCentroInKnownList } from "@/lib/config/app-config";
@@ -430,10 +431,8 @@ async function commitCalendarioMesesPreventivos(input: {
     const ut = (row.ubicacionTecnica ?? "").trim();
     let assetId = resolveAssetIdFromLookup(utToAsset, ut) ?? "";
     const espCode = defaultEspecialidadCode(row);
-    if (espCode === "E") {
-      const cen = input.centroForzado?.trim() || normalizeCentro(row.centro ?? "", ut);
-      assetId = `ee-gral-${cen.toLowerCase()}`;
-    }
+    const cen = input.centroForzado?.trim() || normalizeCentro(row.centro ?? "", ut);
+    assetId = assetIdImportDesdeEspecialidad(espCode, cen, assetId);
     const codigoEquipo = assetId ? codigoNuevoByAssetId.get(assetId) : undefined;
     const centroObjetivo =
       input.centroForzado?.trim() || normalizeCentro(row.centro ?? "", ut, codigoEquipo);
@@ -576,10 +575,7 @@ export async function commitParsedAvisoRows(input: {
     const centro = input.centroForzado?.trim() || normalizeCentro(row.centro ?? "", ut, codigoEquipo);
     const denom = (row.denomUbicTecnica ?? "").trim();
 
-    // ELECTRICO siempre usa activo sintético del centro — nunca un activo real del catálogo.
-    if (espCode === "E") {
-      assetId = `ee-gral-${centro.toLowerCase()}`;
-    }
+    assetId = assetIdImportDesdeEspecialidad(espCode, centro, assetId);
 
     if (assetId) {
       const espExplicita = especialidadExplicitaDesdeTexto(descripcion);
@@ -603,7 +599,6 @@ export async function commitParsedAvisoRows(input: {
 
     if (row.tipo === "correctivo") {
       const fecha = row.fechaProgramada ? new Date(row.fechaProgramada) : null;
-      const cerrado = fecha !== null && !Number.isNaN(fecha.getTime());
       const clave = buildClaveMantenimiento({
         ubicacion_tecnica: ut,
         frecuencia: "UNICA",
@@ -620,8 +615,9 @@ export async function commitParsedAvisoRows(input: {
         especialidad: esp,
         clave_mantenimiento: clave,
         texto_corto: descripcion.slice(0, 500) || numero,
-        estado: (cerrado ? "CERRADO" : "ABIERTO") as EstadoAviso,
-        fecha_programada: fecha ? Timestamp.fromDate(fecha) : null,
+        /** Fecha del Excel = referencia/programación; el cierre es solo vía OT firmada en Seam. */
+        estado: "ABIERTO" as EstadoAviso,
+        fecha_programada: fecha && !Number.isNaN(fecha.getTime()) ? Timestamp.fromDate(fecha) : null,
       };
       if (descripcion.length > 500) payload.texto_largo = descripcion;
       if (denom) {
@@ -750,10 +746,7 @@ async function commitListadoSemestralAnual(
     let esp = especialidadImportToDominio(espCode);
     const codigoEquipo = assetId ? codigoNuevoByAssetId.get(assetId) : undefined;
     const centro = centroForzado?.trim() || normalizeCentro(row.centro ?? "", ut, codigoEquipo);
-    // ELECTRICO siempre usa activo sintético del centro — nunca un activo real del catálogo.
-    if (espCode === "E") {
-      assetId = `ee-gral-${centro.toLowerCase()}`;
-    }
+    assetId = assetIdImportDesdeEspecialidad(espCode, centro, assetId);
     if (assetId) {
       const espExplicita = especialidadExplicitaDesdeTexto(descripcion);
       esp = espExplicita ?? especialidadConPreferenciaCatalogoGg(assetId, esp, especialidadPredeterminadaByAssetId);

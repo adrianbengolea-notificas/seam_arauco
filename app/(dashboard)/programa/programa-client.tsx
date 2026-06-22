@@ -29,7 +29,7 @@ import { mensajeErrorFirebaseParaUsuario } from "@/lib/firebase/mensaje-error-us
 import { formatFirestoreDate } from "@/lib/pdf/format-firestore-date";
 import { HORAS_ALERTA_PROPUESTA_SIN_VISTA } from "@/lib/config/limits";
 import { isSuperAdminRole } from "@/modules/users/roles";
-import { usuarioTieneCentro } from "@/modules/users/centros-usuario";
+import { usuarioTieneCentro, centrosEfectivosDelUsuario } from "@/modules/users/centros-usuario";
 import { etiquetaLocalidadSlot } from "@/lib/format/localidad-programa";
 import { cn } from "@/lib/utils";
 import { useAvisoLive } from "@/modules/notices/hooks";
@@ -1010,6 +1010,39 @@ function SelectorPlantaSuperadmin({
   );
 }
 
+function SelectorPlantaTecnico({
+  value,
+  centros,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  centros: string[];
+  onChange: (centro: string) => void;
+  disabled?: boolean;
+}) {
+  const opciones = centros.length ? centros : [value].filter(Boolean);
+  const selectValue = opciones.includes(value) ? value : (opciones[0] ?? value);
+
+  return (
+    <label className="flex min-w-[10rem] flex-1 flex-col gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      Planta
+      <select
+        className="rounded-lg border border-border bg-background px-3 py-2 text-sm font-normal text-foreground shadow-sm"
+        value={selectValue}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {opciones.map((c) => (
+          <option key={c} value={c}>
+            {nombreCentro(c)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function AvisoDrawer({
   onClose,
   estado,
@@ -1086,8 +1119,12 @@ function AvisoDrawer({
     enabled: buscarOtPorAvisoCerrado,
   });
   const ordenServicioIdEfectiva = ordenServicioExistenteId || otIdPorBusqueda;
-  const avisoCerradoSinOtVisible =
-    avisoFb?.estado === "CERRADO" && !ordenServicioIdEfectiva && !avisoFbLoading && !otBusquedaLoading;
+  const avisoCerradoImportacionSinOt =
+    avisoFb?.estado === "CERRADO" &&
+    !avisoFb?.ultima_ejecucion_ot_id?.trim() &&
+    !ordenServicioIdEfectiva &&
+    !avisoFbLoading &&
+    !otBusquedaLoading;
   const { workOrder: woVinculada, loading: woVinculadaLoading } = useWorkOrderLive(ordenServicioIdEfectiva);
   const puedeCorregirFechaRealizacion =
     esSuperadmin && woVinculada?.estado === "CERRADA" && Boolean(ordenServicioIdEfectiva?.trim());
@@ -1379,7 +1416,7 @@ function AvisoDrawer({
             <Badge variant={avisoVariant(aviso)}>
               {aviso.urgente ? "Urgente" : aviso.tipo === "correctivo" ? "Correctivo" : "Preventivo"}
             </Badge>
-            {avisoFb?.estado === "CERRADO" ? (
+            {avisoFb?.estado === "CERRADO" && avisoFb?.ultima_ejecucion_ot_id?.trim() ? (
               <Badge
                 variant="default"
                 className="border border-emerald-600/40 bg-emerald-600/10 text-emerald-950 dark:text-emerald-100"
@@ -1388,19 +1425,21 @@ function AvisoDrawer({
               </Badge>
             ) : null}
           </div>
-          {avisoFb?.estado === "CERRADO" && !ordenServicioIdEfectiva && !avisoFbLoading && !otBusquedaLoading ? (
-            <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 dark:border-zinc-700 dark:bg-zinc-900/50">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Condición del aviso</p>
-              <p className="mt-2 text-sm text-foreground">
-                Cerrado en el maestro de mantenimiento
-                {avisoFb.ultima_ejecucion_fecha
-                  ? ` · última ejecución ${formatFirestoreDate(avisoFb.ultima_ejecucion_fecha, "dd/MM/yyyy")}`
-                  : ""}
-                .
+          {avisoCerradoImportacionSinOt ? (
+            <div className="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-3 dark:border-amber-500/35 dark:bg-amber-500/10">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-950 dark:text-amber-100">
+                Pendiente de planilla en Seam
               </p>
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                No hay una orden de trabajo en el sistema vinculada a este número (p. ej. cerrado desde SAP o importación
-                histórica). Por eso no aparece en Tareas.
+              <p className="mt-2 text-sm text-amber-950 dark:text-amber-50">
+                Este correctivo tiene fecha en el maestro
+                {avisoFb?.fecha_programada
+                  ? ` (${formatFirestoreDate(avisoFb.fecha_programada, "dd/MM/yyyy")})`
+                  : ""}
+                , pero aún no tiene orden cerrada con firma en el sistema.
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-amber-900/90 dark:text-amber-100/90">
+                Creá la OT, completá la planilla y cerrá con firma. Recién ahí figurará como finalizado en el
+                programa.
               </p>
             </div>
           ) : null}
@@ -1606,17 +1645,20 @@ function AvisoDrawer({
               <Button className="w-full" type="button" disabled>
                 Comprobando si ya hay orden…
               </Button>
-            ) : avisoCerradoSinOtVisible ? (
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                Este aviso está cerrado y no tiene OT en el sistema. El estado figura arriba en{" "}
-                <span className="font-semibold text-foreground">Condición del aviso</span>.
-              </p>
             ) : (
-              <Button className="w-full" asChild>
-                <Link href={`/tareas/nueva?avisoId=${encodeURIComponent(aviso.numero)}`}>
-                  + Crear OT
-                </Link>
-              </Button>
+              <>
+                {avisoCerradoImportacionSinOt ? (
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Importación anterior lo marcó cerrado sin OT. Usá el botón de abajo para iniciar el circuito
+                    completo (planilla + firma).
+                  </p>
+                ) : null}
+                <Button className="w-full" asChild>
+                  <Link href={`/tareas/nueva?avisoId=${encodeURIComponent(aviso.numero)}`}>
+                    + Crear OT
+                  </Link>
+                </Button>
+              </>
             )}
           </div>
         ) : null}
@@ -1636,6 +1678,8 @@ export function ProgramaClient() {
   const { puede, rol } = usePermisos();
   const esCliente = rol === "cliente_arauco";
   const esRolTecnico = rol === "tecnico";
+  const centrosPerfil = useMemo(() => centrosEfectivosDelUsuario(profile), [profile]);
+  const esTecnicoMultiCentro = esRolTecnico && centrosPerfil.length > 1;
   const especialidadesProgramaTecnico = useMemo((): EspecialidadPrograma[] => {
     if (!esRolTecnico) return [];
     return especialidadesProgramaVisiblesTecnico(profile?.especialidades);
@@ -1655,11 +1699,16 @@ export function ProgramaClient() {
   const centroParam = searchParams.get("centro")?.trim() ?? "";
 
   const centroDesdeUrl = useMemo(() => {
+    if (esTecnicoMultiCentro) {
+      if (centroParam && centrosPerfil.includes(centroParam)) return centroParam;
+      if (centrosPerfil.includes(perfilCentro)) return perfilCentro;
+      return centrosPerfil[0] ?? perfilCentro;
+    }
     if (!viewerEligeAlcanceMultiPlanta) return perfilCentro;
     if (centroParam === CENTRO_SELECTOR_TODAS_PLANTAS) return CENTRO_SELECTOR_TODAS_PLANTAS;
     if (centroParam && isCentroInKnownList(centroParam)) return centroParam;
     return CENTRO_SELECTOR_TODAS_PLANTAS;
-  }, [viewerEligeAlcanceMultiPlanta, perfilCentro, centroParam]);
+  }, [esTecnicoMultiCentro, centrosPerfil, perfilCentro, centroParam, viewerEligeAlcanceMultiPlanta]);
 
   const [centroSelectorOptimista, setCentroSelectorOptimista] = useState<string | null>(null);
 
@@ -1678,13 +1727,51 @@ export function ProgramaClient() {
 
   /** Default explícito en URL para roles multi-planta (evita heredar `?centro=PC01` implícito). */
   useEffect(() => {
-    if (authLoading || !viewerEligeAlcanceMultiPlanta) return;
+    if (authLoading) return;
+    if (esTecnicoMultiCentro) {
+      if (centroParam && centrosPerfil.includes(centroParam)) return;
+      const p = new URLSearchParams(searchParams.toString());
+      const def = centrosPerfil.includes(perfilCentro) ? perfilCentro : (centrosPerfil[0] ?? perfilCentro);
+      p.set("centro", def);
+      const q = p.toString();
+      void router.replace(q ? `/programa?${q}` : "/programa", { scroll: false });
+      return;
+    }
+    if (!viewerEligeAlcanceMultiPlanta) return;
     if (centroParam) return;
     const p = new URLSearchParams(searchParams.toString());
     p.set("centro", CENTRO_SELECTOR_TODAS_PLANTAS);
     const q = p.toString();
     void router.replace(q ? `/programa?${q}` : "/programa", { scroll: false });
-  }, [authLoading, viewerEligeAlcanceMultiPlanta, centroParam, router, searchParams]);
+  }, [authLoading, esTecnicoMultiCentro, centrosPerfil, perfilCentro, centroParam, viewerEligeAlcanceMultiPlanta, router, searchParams]);
+
+  const onCentroProgramaChange = useCallback(
+    (nextCentro: string) => {
+      const centroValido = esTecnicoMultiCentro
+        ? centrosPerfil.includes(nextCentro)
+          ? nextCentro
+          : (centrosPerfil.includes(perfilCentro) ? perfilCentro : (centrosPerfil[0] ?? perfilCentro))
+        : nextCentro === CENTRO_SELECTOR_TODAS_PLANTAS
+          ? CENTRO_SELECTOR_TODAS_PLANTAS
+          : isCentroInKnownList(nextCentro)
+            ? nextCentro
+            : CENTRO_SELECTOR_TODAS_PLANTAS;
+
+      setCentroSelectorOptimista(centroValido);
+      setSemanaIdElegida(null);
+
+      const p = new URLSearchParams(searchParams.toString());
+      p.set("centro", centroValido);
+
+      const semNorm = normalizarSemanaParamAlCambiarCentro(p.get("semana"), centroValido);
+      if (semNorm) p.set("semana", semNorm);
+
+      p.delete("vista");
+      const q = p.toString();
+      void router.replace(q ? `/programa?${q}` : "/programa", { scroll: false });
+    },
+    [esTecnicoMultiCentro, centrosPerfil, perfilCentro, router, searchParams],
+  );
 
   const puedeLeerMotorPropuestasEnSemanas = tienePermiso(
     (profile?.rol as Rol) ?? "tecnico",
@@ -1809,27 +1896,9 @@ export function ProgramaClient() {
 
   const onCentroSuperadminChange = useCallback(
     (nextCentro: string) => {
-      const centroValido =
-        nextCentro === CENTRO_SELECTOR_TODAS_PLANTAS
-          ? CENTRO_SELECTOR_TODAS_PLANTAS
-          : isCentroInKnownList(nextCentro)
-            ? nextCentro
-            : CENTRO_SELECTOR_TODAS_PLANTAS;
-
-      setCentroSelectorOptimista(centroValido);
-      setSemanaIdElegida(null);
-
-      const p = new URLSearchParams(searchParams.toString());
-      p.set("centro", centroValido);
-
-      const semNorm = normalizarSemanaParamAlCambiarCentro(p.get("semana"), centroValido);
-      if (semNorm) p.set("semana", semNorm);
-
-      p.delete("vista");
-      const q = p.toString();
-      void router.replace(q ? `/programa?${q}` : "/programa", { scroll: false });
+      onCentroProgramaChange(nextCentro);
     },
-    [router, searchParams],
+    [onCentroProgramaChange],
   );
 
   /**
@@ -2310,13 +2379,21 @@ export function ProgramaClient() {
                 <p className="mt-1 text-xs text-muted-foreground">
                   Esta vista usa el centro de tu perfil.
                   {esRolTecnico
-                    ? " Ves el programa de tu especialidad (asignadas a vos o sin asignar), incluidas las completadas, en cualquier semana del selector."
+                    ? esTecnicoMultiCentro
+                      ? " Elegí la planta arriba; ves el programa de tu especialidad (asignadas a vos o sin asignar), incluidas las completadas."
+                      : " Ves el programa de tu especialidad (asignadas a vos o sin asignar), incluidas las completadas, en cualquier semana del selector."
                     : null}
                 </p>
               )}
             </div>
-            {viewerSuperadmin ? (
+            {viewerEligeAlcanceMultiPlanta ? (
               <SelectorPlantaSuperadmin value={centroEfectivo} onChange={onCentroSuperadminChange} />
+            ) : esTecnicoMultiCentro ? (
+              <SelectorPlantaTecnico
+                value={centroEfectivo}
+                centros={centrosPerfil}
+                onChange={onCentroProgramaChange}
+              />
             ) : null}
           </div>
           <SelectorVistaPrograma
@@ -2662,6 +2739,12 @@ export function ProgramaClient() {
         </div>
         {viewerEligeAlcanceMultiPlanta ? (
           <SelectorPlantaSuperadmin value={centroEfectivo} onChange={onCentroSuperadminChange} />
+        ) : esTecnicoMultiCentro ? (
+          <SelectorPlantaTecnico
+            value={centroEfectivo}
+            centros={centrosPerfil}
+            onChange={onCentroProgramaChange}
+          />
         ) : null}
         <label className="flex min-w-[12rem] max-w-md flex-[1.5] flex-col gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Búsqueda

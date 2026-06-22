@@ -1,9 +1,9 @@
 /**
- * Crea (o actualiza) un activo sintético de Eléctrico General por cada centro conocido.
- * El ID de documento es determinista: `ee-gral-{centro_en_minúsculas}` (ej. `ee-gral-pc01`).
- * El import de avisos usa ese mismo ID como fallback para filas ELECTRICO sin UT en catálogo.
+ * Crea (o actualiza) un activo sintético de Aire General por cada centro conocido.
+ * El ID de documento es determinista: `aa-gral-{centro_en_minúsculas}` (ej. `aa-gral-pc01`).
+ * El import de avisos usa ese mismo ID como fallback para filas AA sin UT en catálogo.
  *
- *   npm run seed:ee-sintetico
+ *   npm run seed:aa-sintetico
  */
 
 import { config as loadEnv } from "dotenv";
@@ -11,10 +11,13 @@ import { config as loadEnv } from "dotenv";
 loadEnv();
 loadEnv({ path: ".env.local", override: true });
 
+import {
+  CODIGO_AA_GRAL,
+  syntheticAaAssetId,
+} from "@/lib/assets/synthetic-gral-asset";
 import { getAdminDb } from "@/firebase/firebaseAdmin";
 import { ASSETS_COLLECTION } from "@/lib/firestore/collections";
 import { FieldValue } from "firebase-admin/firestore";
-import { syntheticEeAssetId } from "@/scripts/seed/synthetic-ee-asset-id";
 
 const CENTROS = ["PC01", "PF01", "PM02", "PT01"];
 
@@ -23,16 +26,16 @@ async function main() {
   const col = db.collection(ASSETS_COLLECTION);
 
   for (const centro of CENTROS) {
-    const id = syntheticEeAssetId(centro);
+    const id = syntheticAaAssetId(centro);
     const ref = col.doc(id);
     const snap = await ref.get();
 
     const data: Record<string, unknown> = {
-      codigo_nuevo: "EE-GRAL",
-      denominacion: "Eléctrico General",
-      ubicacion_tecnica: `EE-GRAL-${centro}`,
+      codigo_nuevo: CODIGO_AA_GRAL,
+      denominacion: "Aire General",
+      ubicacion_tecnica: `${CODIGO_AA_GRAL}-${centro}`,
       centro,
-      especialidad_predeterminada: "ELECTRICO",
+      especialidad_predeterminada: "AA",
       activo_operativo: true,
       updated_at: FieldValue.serverTimestamp(),
     };
@@ -43,7 +46,7 @@ async function main() {
     await ref.set(data, { merge: true });
     console.log(`${snap.exists ? "actualizado" : "creado  "} assets/${id}  (centro ${centro})`);
   }
-  console.log("\nListo:", CENTROS.length, "activos sintéticos EE.");
+  console.log("\nListo:", CENTROS.length, "activos sintéticos AA.");
 }
 
 main().catch((e) => {

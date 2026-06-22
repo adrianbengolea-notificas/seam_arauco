@@ -34,6 +34,7 @@ import {
   diaIsoSemanaADiaPrograma,
   diaProgramaADiaIsoSemana,
   getIsoWeekId,
+  isoDiaSemanaDesdeDateLocal,
   parseIsoWeekIdFromSemanaParam,
 } from "@/modules/scheduling/iso-week";
 import type { UserProfileWithUid } from "@/modules/users/repository";
@@ -127,6 +128,15 @@ function numeroOtEnProgramaPublicado(nOt: string | undefined, workOrderId: strin
   return `OT-ID-${workOrderId.slice(0, 12)}`;
 }
 
+/** Número de chip en grilla: preferir aviso SAP / n_ot legible; fallback OT-… */
+export function numeroChipProgramaDesdeWorkOrder(wo: Pick<WorkOrder, "n_ot" | "id" | "aviso_numero">): string {
+  const avisoNum = (wo.aviso_numero ?? "").trim();
+  if (avisoNum) return avisoNum;
+  const nOt = (wo.n_ot ?? "").trim();
+  if (nOt && !nOt.startsWith("OT-")) return nOt;
+  return numeroOtEnProgramaPublicado(wo.n_ot, wo.id);
+}
+
 function tipoTrabajoWoAAvisoTipo(tipo: TipoAviso): "preventivo" | "correctivo" {
   return tipo === "CORRECTIVO" || tipo === "EMERGENCIA" ? "correctivo" : "preventivo";
 }
@@ -152,13 +162,14 @@ async function syncOtManualAlProgramaPublicado(input: {
   const espProg = especialidadAAvisoToPrograma(input.wo.especialidad);
   const loc = (input.wo.ubicacion_tecnica ?? "").trim() || "—";
   const nuevoAviso: AvisoSlot = {
-    numero: numeroOtEnProgramaPublicado(input.wo.n_ot, input.wo.id),
+    numero: numeroChipProgramaDesdeWorkOrder(input.wo),
     descripcion: descripcionOtAgendaManual(input.wo, input.turno),
     tipo: tipoTrabajoWoAAvisoTipo(input.wo.tipo_trabajo),
     urgente: input.wo.tipo_trabajo === "EMERGENCIA",
     equipoCodigo: input.wo.codigo_activo_snapshot,
     ubicacion: input.wo.ubicacion_tecnica,
     workOrderId: input.wo.id,
+    ...(input.wo.aviso_id?.trim() ? { avisoFirestoreId: input.wo.aviso_id.trim() } : {}),
   };
   await appendAvisoToProgramaSemanaAdmin({
     semanaId: input.weekId,
@@ -651,6 +662,149 @@ export async function removeAvisoFromPublishedPrograma(input: {
       .get();
     for (const doc of snap.docs) {
       await deleteWeeklySlotAdmin(semanaIso, doc.id);
+    }
+  }
+}
+
+export type ProgramarOtEnGrillaResult = {
+  weekId: string;
+  diaSemana: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  weeklySlotId?: string;
+  /** Solo se publicó en `programa_semanal` (fallback si falla `weekly_schedule`). */
+  soloProgramaPublicado?: boolean;
+};
+
+/** Publica chip en `programa_semanal` sin tocar `weekly_schedule`. */
+export async function publicarWorkOrderEnProgramaSemanalAdmin(
+  workOrderId: string,
+  options?: {
+    weekId?: string;
+    dia_semana?: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+    turno?: "A" | "B" | "C";
+  },
+): Promise<ProgramarOtEnGrillaResult> {
+  const wo = await getWorkOrderById(workOrderId.trim());
+  if (!wo) {
+    throw new AppError("NOT_FOUND", "OT no encontrada", { details: { workOrderId } });
+  }
+  if (wo.archivada === true) {
+    throw new AppError("CONFLICT", "No se programa una OT archivada");
+  }
+  const centroOt = String(wo.centro ?? "").trim();
+  if (!centroOt) {
+    throw new AppError("VALIDATION", "La OT no tiene centro definido");
+  }
+  if (wo.estado === "ANULADA" || wo.estado === "CERRADA") {
+    throw new AppError("CONFLICT", "No se programa una OT cerrada o anulada");
+  }
+
+  let weekId = options?.weekId?.trim() ?? "";
+  let diaSemana = options?.dia_semana;
+
+  if (!weekId || !diaSemana) {
+    const fp = wo.fecha_inicio_programada;
+    const fecha =
+      fp != null && typeof (fp as { toDate?: () => Date }).toDate === "function"
+        ? (fp as { toDate: () => Date }).toDate()
+        : new Date();
+    const d = Number.isNaN(fecha.getTime()) ? new Date() : fecha;
+    weekId = weekId || getIsoWeekId(d);
+    diaSemana = diaSemana ?? isoDiaSemanaDesdeDateLocal(d);
+  }
+
+  if (!weekId || !diaSemana) {
+    throw new AppError("INTERNAL", "No se pudo resolver semana o día para publicar la OT");
+  }
+
+  await ensureProgramaSemanalDocParaSemanaIsoAdmin({ semanaIso: weekId, centro: centroOt });
+  await syncOtManualAlProgramaPublicado({
+    weekId,
+    centro: centroOt,
+    wo,
+    diaPrograma: diaIsoSemanaADiaPrograma(diaSemana),
+    turno: options?.turno,
+  });
+
+  return { weekId, diaSemana, soloProgramaPublicado: true };
+}
+
+/**
+ * Alta / reparación manual: agenda en `weekly_schedule` y publica chip en `programa_semanal`.
+ * Si falla la agenda operativa, intenta al menos la grilla publicada (visible para técnicos).
+ */
+export async function programarWorkOrderManualCompleto(
+  workOrderId: string,
+): Promise<ProgramarOtEnGrillaResult> {
+  const wo = await getWorkOrderById(workOrderId.trim());
+  if (!wo) {
+    throw new AppError("NOT_FOUND", "OT no encontrada", { details: { workOrderId } });
+  }
+
+  const avisoId = wo.aviso_id?.trim();
+  let vinculadoEnGrillaPublicada = false;
+  let weekId: string | undefined;
+  let diaSemana: 1 | 2 | 3 | 4 | 5 | 6 | 7 | undefined;
+
+  if (avisoId) {
+    const aviso = await getAvisoById(avisoId);
+    if (aviso) {
+      const ubicPrograma = await resolverUbicacionAvisoEnProgramaPublicado({
+        centro: aviso.centro,
+        n_aviso: aviso.n_aviso,
+        avisoFirestoreId: aviso.id,
+        incluido_en_semana: aviso.incluido_en_semana,
+        fechaReferencia: wo.fecha_inicio_programada ?? aviso.fecha_programada ?? null,
+      });
+      if (ubicPrograma) {
+        weekId = ubicPrograma.weekId;
+        diaSemana = diaProgramaADiaIsoSemana(ubicPrograma.dia);
+        vinculadoEnGrillaPublicada = await vincularWorkOrderEnProgramaPublicadoDesdeAviso({
+          workOrderId,
+          avisoId,
+        });
+        if (vinculadoEnGrillaPublicada && weekId && diaSemana) {
+          return { weekId, diaSemana };
+        }
+      }
+    }
+  }
+
+  const fp = wo.fecha_inicio_programada;
+  const fecha =
+    fp != null && typeof (fp as { toDate?: () => Date }).toDate === "function"
+      ? (fp as { toDate: () => Date }).toDate()
+      : new Date();
+  const fechaAgenda = Number.isNaN(fecha.getTime()) ? new Date() : fecha;
+  weekId = weekId ?? getIsoWeekId(fechaAgenda);
+  diaSemana = diaSemana ?? isoDiaSemanaDesdeDateLocal(fechaAgenda);
+
+  if (!weekId || !diaSemana) {
+    throw new AppError("INTERNAL", "No se pudo resolver semana o día para programar la OT");
+  }
+
+  try {
+    const weeklySlotId = await scheduleWorkOrderInWeek({
+      weekId,
+      workOrderId,
+      dia_semana: diaSemana,
+      skipProgramaPublicadoSync: vinculadoEnGrillaPublicada,
+    });
+    return { weekId, diaSemana, weeklySlotId };
+  } catch (primaryErr) {
+    try {
+      const fallback = await publicarWorkOrderEnProgramaSemanalAdmin(workOrderId, {
+        weekId,
+        dia_semana: diaSemana,
+      });
+      return fallback;
+    } catch (fallbackErr) {
+      const msgPrim = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+      const msgFall = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+      throw new AppError(
+        "INTERNAL",
+        `No se pudo publicar la OT en el programa semanal (${msgFall}). Agenda operativa: ${msgPrim}`,
+        { details: { workOrderId, weekId } },
+      );
     }
   }
 }

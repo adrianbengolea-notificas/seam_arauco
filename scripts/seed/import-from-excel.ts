@@ -484,7 +484,6 @@ async function importCorrectivos(utToAsset: Map<string, string>): Promise<number
       continue;
     }
     const fecha = parseLooseDate(fechaStr);
-    const cerrado = fecha !== null;
     const id = avisoDocId(numero);
     const payload: AvisoPayload = {
       n_aviso: numero,
@@ -496,7 +495,7 @@ async function importCorrectivos(utToAsset: Map<string, string>): Promise<number
       especialidad: mapEspecialidad(espRaw),
       texto_corto: descripcion.slice(0, 500) || numero,
       texto_largo: descripcion.length > 500 ? descripcion : undefined,
-      estado: cerrado ? "CERRADO" : "ABIERTO",
+      estado: "ABIERTO",
       fecha_programada: fecha ? Timestamp.fromDate(fecha) : null,
     };
     out.push({ id, data: { ...payload } });

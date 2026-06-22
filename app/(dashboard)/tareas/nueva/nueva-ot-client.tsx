@@ -475,11 +475,21 @@ export function NuevaOtClient({ initialAvisoParam }: { initialAvisoParam?: strin
         setMsg(res.error.message);
         return;
       }
+      if (res.data.advertenciaPrograma && !res.data.programadaEnGrilla) {
+        setMsg(
+          `OT creada (${res.data.id}) pero no apareció en el programa semanal: ${res.data.advertenciaPrograma}`,
+        );
+        window.location.href = `/tareas/${res.data.id}`;
+        return;
+      }
+      if (res.data.advertenciaPrograma && res.data.programadaEnGrilla) {
+        setMsg(res.data.advertenciaPrograma);
+      }
       if (subTipo === "correctivo" && fechaProg.trim()) {
         const d = new Date(`${fechaProg.trim()}T12:00:00`);
         const p = new URLSearchParams();
         p.set("centro", centro.trim());
-        p.set("semana", getIsoWeekId(d));
+        p.set("semana", res.data.semanaPrograma ?? getIsoWeekId(d));
         window.location.href = `/programa?${p.toString()}`;
         return;
       }

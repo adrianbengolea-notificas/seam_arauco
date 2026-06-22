@@ -35,15 +35,10 @@ import {
   proximoVencimientoDesdeFecha,
 } from "@/lib/vencimientos";
 import { resolveAvisoVinculadoAWorkOrder } from "@/modules/work-orders/resolve-aviso-vinculado";
+import { getIsoWeekId } from "@/modules/scheduling/iso-week";
 import {
-  diaProgramaADiaIsoSemana,
-  getIsoWeekId,
-  isoDiaSemanaDesdeDateLocal,
-} from "@/modules/scheduling/iso-week";
-import {
+  programarWorkOrderManualCompleto,
   resolverUbicacionAvisoEnProgramaPublicado,
-  scheduleWorkOrderInWeek,
-  vincularWorkOrderEnProgramaPublicadoDesdeAviso,
 } from "@/modules/scheduling/service";
 import type { EspecialidadPrograma, DiaSemanaPrograma } from "@/modules/scheduling/types";
 import { clearWorkOrderIdEnProgramaSemanaAdmin } from "@/modules/scheduling/repository";
@@ -75,7 +70,6 @@ import {
   type WorkOrderVistaStatus,
 } from "@/modules/work-orders/types";
 import { FieldValue, Timestamp as AdminTimestamp, type Transaction } from "firebase-admin/firestore";
-import { startOfDay } from "date-fns";
 
 function tipoFromSubtipo(st: WorkOrderSubTipo): TipoAviso {
   if (st === "correctivo") return "CORRECTIVO";
@@ -571,90 +565,36 @@ export async function signUsuarioPlanta(input: {
   });
 }
 
-/** Alta manual: ubica la OT en la semana ISO (`weekly_schedule` + grilla publicada cuando aplique). */
-async function autoProgramarOtManualEnSemanaIso(workOrderId: string): Promise<void> {
-  const wo = await getWorkOrderById(workOrderId);
-  if (!wo) return;
+export type CreateWorkOrderFromFormResult = {
+  id: string;
+  programadaEnGrilla: boolean;
+  advertenciaPrograma?: string;
+  semanaPrograma?: string;
+};
 
-  const avisoId = wo.aviso_id?.trim();
-  let ubicPrograma: Awaited<ReturnType<typeof resolverUbicacionAvisoEnProgramaPublicado>> = null;
-  let vinculadoEnGrillaPublicada = false;
-
-  if (avisoId) {
-    const aviso = await getAvisoById(avisoId);
-    if (aviso) {
-      ubicPrograma = await resolverUbicacionAvisoEnProgramaPublicado({
-        centro: aviso.centro,
-        n_aviso: aviso.n_aviso,
-        avisoFirestoreId: aviso.id,
-        incluido_en_semana: aviso.incluido_en_semana,
-        fechaReferencia: wo.fecha_inicio_programada ?? aviso.fecha_programada ?? null,
-      });
-      if (ubicPrograma) {
-        vinculadoEnGrillaPublicada = await vincularWorkOrderEnProgramaPublicadoDesdeAviso({
-          workOrderId,
-          avisoId,
-        });
-      }
-    }
-  }
-
-  let weekId: string;
-  let diaSemana: 1 | 2 | 3 | 4 | 5 | 6 | 7;
-  let fechaAgenda: Date;
-
-  if (ubicPrograma) {
-    weekId = ubicPrograma.weekId;
-    diaSemana = diaProgramaADiaIsoSemana(ubicPrograma.dia);
-    const slotTs = ubicPrograma.slotFecha;
-    if (slotTs != null && typeof slotTs.toDate === "function") {
-      const d = slotTs.toDate();
-      fechaAgenda = Number.isNaN(d.getTime()) ? new Date() : d;
-      const fp = wo.fecha_inicio_programada;
-      const fpMs =
-        fp != null && typeof (fp as AdminTimestamp).toDate === "function"
-          ? (fp as AdminTimestamp).toDate().getTime()
-          : NaN;
-      if (Number.isNaN(fpMs) || fpMs !== fechaAgenda.getTime()) {
-        await updateWorkOrderDoc(workOrderId, {
-          fecha_inicio_programada: slotTs as AdminTimestamp,
-        });
-      }
-    } else {
-      const fp = wo.fecha_inicio_programada;
-      if (fp != null && typeof (fp as AdminTimestamp).toDate === "function") {
-        const d = (fp as AdminTimestamp).toDate();
-        fechaAgenda = Number.isNaN(d.getTime()) ? new Date() : d;
-      } else {
-        fechaAgenda = new Date();
-      }
-    }
-  } else {
-    const fp = wo.fecha_inicio_programada;
-    if (fp != null && typeof (fp as AdminTimestamp).toDate === "function") {
-      const d = (fp as AdminTimestamp).toDate();
-      fechaAgenda = Number.isNaN(d.getTime()) ? new Date() : d;
-    } else {
-      fechaAgenda = new Date();
-    }
-    weekId = getIsoWeekId(fechaAgenda);
-    diaSemana = isoDiaSemanaDesdeDateLocal(fechaAgenda);
-    if (fp == null) {
-      await updateWorkOrderDoc(workOrderId, {
-        fecha_inicio_programada: AdminTimestamp.fromDate(startOfDay(fechaAgenda)),
-      });
-    }
-  }
-
+/** Alta manual: publica chip en grilla semanal (y agenda operativa cuando aplique). */
+async function autoProgramarOtManualEnSemanaIso(
+  workOrderId: string,
+): Promise<{ programadaEnGrilla: boolean; advertenciaPrograma?: string; semanaPrograma?: string }> {
   try {
-    await scheduleWorkOrderInWeek({
-      weekId,
-      workOrderId,
-      dia_semana: diaSemana,
-      skipProgramaPublicadoSync: vinculadoEnGrillaPublicada,
-    });
+    const r = await programarWorkOrderManualCompleto(workOrderId);
+    return {
+      programadaEnGrilla: true,
+      semanaPrograma: r.weekId,
+      ...(r.soloProgramaPublicado
+        ? {
+            advertenciaPrograma:
+              "La OT figura en el programa publicado; la agenda operativa (weekly_schedule) no se actualizó.",
+          }
+        : {}),
+    };
   } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
     console.error("[OT manual] No se pudo agendar en programa semanal:", e);
+    return {
+      programadaEnGrilla: false,
+      advertenciaPrograma: msg,
+    };
   }
 }
 
@@ -675,7 +615,7 @@ export async function createWorkOrderFromForm(input: {
   denom_ubic_tecnica?: string;
   activo_fuera_catalogo?: boolean;
   activo_manual_descripcion?: string;
-}): Promise<string> {
+}): Promise<CreateWorkOrderFromFormResult> {
   const cIn = input.centro.trim();
   if (!cIn) {
     throw new AppError("VALIDATION", "Centro requerido");
@@ -846,9 +786,9 @@ export async function createWorkOrderFromForm(input: {
     payload: { aviso_id: aviso_id_final, n_ot },
   });
 
-  await autoProgramarOtManualEnSemanaIso(id);
+  const prog = await autoProgramarOtManualEnSemanaIso(id);
 
-  return id;
+  return { id, ...prog };
 }
 
 export async function applyWorkOrderVistaStatus(input: {

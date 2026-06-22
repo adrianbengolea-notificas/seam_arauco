@@ -330,10 +330,28 @@ export async function appendAvisoToProgramaSemanaAdmin(input: {
   if (idx >= 0) {
     const cur = slots[idx]!;
     const avisos = [...(cur.avisos ?? [])];
-    if (avisos.some((a) => a.numero === input.nuevoAviso.numero)) {
-      return;
+    const dupeIdx = avisos.findIndex((a) => a.numero === input.nuevoAviso.numero);
+    if (dupeIdx >= 0) {
+      const exist = avisos[dupeIdx]!;
+      const woNuevo = input.nuevoAviso.workOrderId?.trim();
+      const woExist = exist.workOrderId?.trim();
+      if (woNuevo && !woExist) {
+        avisos[dupeIdx] = {
+          ...exist,
+          workOrderId: woNuevo,
+          ...(input.nuevoAviso.descripcion?.trim() && !exist.descripcion?.trim()
+            ? { descripcion: input.nuevoAviso.descripcion }
+            : {}),
+        };
+      } else if (woNuevo && woExist && woExist !== woNuevo) {
+        throw new AppError("CONFLICT", "El aviso ya está en el programa con otra orden vinculada", {
+          details: { numero: input.nuevoAviso.numero, workOrderIdExistente: woExist },
+        });
+      }
+      // Idempotente: mismo chip y misma OT (o sin OT nueva).
+    } else {
+      avisos.push(input.nuevoAviso);
     }
-    avisos.push(input.nuevoAviso);
     const next = [...slots];
     next[idx] = {
       ...cur,

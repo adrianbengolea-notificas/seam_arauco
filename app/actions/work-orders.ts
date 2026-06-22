@@ -382,7 +382,14 @@ const createWorkOrderSchema = z
 export async function createWorkOrder(
   idToken: string,
   input: z.infer<typeof createWorkOrderSchema>,
-): Promise<ActionResult<{ id: string }>> {
+): Promise<
+  ActionResult<{
+    id: string;
+    programadaEnGrilla?: boolean;
+    advertenciaPrograma?: string;
+    semanaPrograma?: string;
+  }>
+> {
   return wrap(async () => {
     const session = await requirePermisoFromToken(idToken, "ot:crear_manual");
     const parsed = createWorkOrderSchema.parse(input);
@@ -395,7 +402,7 @@ export async function createWorkOrder(
         ? String(parsed.fecha_inicio_programada).trim()
         : "";
     const fecha = fechaStr.length ? Timestamp.fromDate(new Date(fechaStr)) : undefined;
-    const id = await createWorkOrderFromForm({
+    const created = await createWorkOrderFromForm({
       actorUid: session.uid,
       centro: parsed.centro,
       asset_id: parsed.asset_id,
@@ -417,7 +424,7 @@ export async function createWorkOrder(
     if (parsed.aviso_id) {
       const aviso = await getAvisoById(parsed.aviso_id);
       if (aviso?.urgente === true) {
-        const wo = await getWorkOrderById(id);
+        const wo = await getWorkOrderById(created.id);
         if (wo) {
           const dest = [
             ...(await destinatariosClienteArauco(wo.centro)),
@@ -433,7 +440,12 @@ export async function createWorkOrder(
       }
     }
 
-    return { id };
+    return {
+      id: created.id,
+      programadaEnGrilla: created.programadaEnGrilla,
+      advertenciaPrograma: created.advertenciaPrograma,
+      semanaPrograma: created.semanaPrograma,
+    };
   });
 }
 

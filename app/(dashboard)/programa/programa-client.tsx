@@ -288,14 +288,18 @@ function normalizarSemanaParamAlCambiarCentro(
 
 type FiltroEspecialidad = EspecialidadPrograma | "todos";
 type FiltroDia = DiaSemanaPrograma | "todos";
-type FiltroTipo = "todos" | "correctivo" | "urgente";
+type FiltroTipo = "todos" | "correctivo" | "preventivo";
 
-/**
- * Filtro de la grilla: etapas del chip (leyenda) u orden previa SAP (aro rojo), sin mezclar con «Todos» a la vez.
- */
+/** Filtro simplificado de la grilla (agrupa las etapas del chip de la leenda). */
 type FiltroEstadoOperativo =
   | "todos"
-  | "orden_previa_pendiente"
+  | "pendiente"
+  | "en_proceso"
+  | "realizado_finalizado"
+  | "listo_cierre"
+  | "anulada";
+
+type CategoriaEstadoOperativoChip =
   | "sin_orden"
   | "abierta_borrador"
   | "en_ejecucion"
@@ -304,7 +308,26 @@ type FiltroEstadoOperativo =
   | "cerrada"
   | "anulada";
 
-type CategoriaEstadoOperativoChip = Exclude<FiltroEstadoOperativo, "todos" | "orden_previa_pendiente">;
+const FILTRO_POR_CATEGORIA_CHIP: Record<
+  CategoriaEstadoOperativoChip,
+  Exclude<FiltroEstadoOperativo, "todos">
+> = {
+  sin_orden: "pendiente",
+  abierta_borrador: "pendiente",
+  en_ejecucion: "en_proceso",
+  pendiente_firma: "realizado_finalizado",
+  listo_cierre: "listo_cierre",
+  cerrada: "realizado_finalizado",
+  anulada: "anulada",
+};
+
+function categoriaPasaFiltroEstadoOperativo(
+  categoria: CategoriaEstadoOperativoChip,
+  filtro: FiltroEstadoOperativo,
+): boolean {
+  if (filtro === "todos") return true;
+  return FILTRO_POR_CATEGORIA_CHIP[categoria] === filtro;
+}
 
 function avisoVariant(a: AvisoSlot): "urgente" | "correctivo" | "preventivo" {
   if (a.urgente) return "urgente";
@@ -315,7 +338,7 @@ function avisoVariant(a: AvisoSlot): "urgente" | "correctivo" | "preventivo" {
 function avisoPasaTipo(a: AvisoSlot, filtro: FiltroTipo): boolean {
   if (filtro === "todos") return true;
   if (filtro === "correctivo") return a.tipo === "correctivo";
-  return a.urgente === true;
+  return a.tipo === "preventivo";
 }
 
 function avisoPasaFiltros(a: AvisoSlot, tipo: FiltroTipo): boolean {
@@ -612,7 +635,6 @@ function avisoVisibleEnGrilla(
   }
   if (!avisoPasaBusqueda(a, busqueda ?? "", ctxBusqueda)) return false;
   if (!avisoPasaFiltros(a, tipo)) return false;
-  if (filtroEstado === "orden_previa_pendiente") return Boolean(a.ordenPreviaPendiente);
   if (filtroEstado === "todos") return true;
   const ordenId = ordenServicioIdEfectivaEnPrograma(a, workOrderIdPorAvisoDocId);
   const { estadoServicio, cargandoEstadoServicio } = chipEstadoServicioProps(
@@ -620,7 +642,8 @@ function avisoVisibleEnGrilla(
     estadosPorId,
     loadingEstados,
   );
-  return categoriaEstadoOperativoChip(ordenId, estadoServicio, cargandoEstadoServicio) === filtroEstado;
+  const categoria = categoriaEstadoOperativoChip(ordenId, estadoServicio, cargandoEstadoServicio);
+  return categoriaPasaFiltroEstadoOperativo(categoria, filtroEstado);
 }
 
 function slotsFiltrados(
@@ -2888,7 +2911,7 @@ export function ProgramaClient() {
           >
             <option value="todos">Todos</option>
             <option value="correctivo">Correctivo</option>
-            <option value="urgente">Urgente</option>
+            <option value="preventivo">Preventivo</option>
           </select>
         </label>
         <label className="flex min-w-[12rem] flex-[1.25] flex-col gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -2899,14 +2922,11 @@ export function ProgramaClient() {
             onChange={(e) => setFiltroEstadoOperativo(e.target.value as FiltroEstadoOperativo)}
           >
             <option value="todos">Todos</option>
-            <option value="orden_previa_pendiente">Solo avisos con orden previa por cerrar (SAP nuevo)</option>
-            <option value="sin_orden">Solo aviso en plan · sin orden vinculada</option>
-            <option value="abierta_borrador">Orden abierta o borrador</option>
-            <option value="en_ejecucion">En ejecución</option>
-            <option value="pendiente_firma">Realizado · pendiente firma del solicitante</option>
-            <option value="listo_cierre">Listo para cierre formal</option>
-            <option value="cerrada">Terminado · cerrada en sistema</option>
-            <option value="anulada">Anulada</option>
+            <option value="pendiente">Pendiente</option>
+            <option value="en_proceso">En proceso</option>
+            <option value="realizado_finalizado">Realizado / finalizado</option>
+            <option value="listo_cierre">Listo para cierre</option>
+            <option value="anulada">Anulado</option>
           </select>
         </label>
       </section>

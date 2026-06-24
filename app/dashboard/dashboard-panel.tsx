@@ -159,13 +159,14 @@ function ColaChip({
   );
 }
 
-export function DashboardPanel() {
+export function DashboardPanel({ vistaCliente = false }: { vistaCliente?: boolean } = {}) {
   const { rol, puede, authLoading, user, profile } = usePermisos();
   const router = useRouter();
+  const esClienteArauco = rol === "cliente_arauco" || vistaCliente;
   useEffect(() => {
-    if (authLoading) return;
+    if (vistaCliente || authLoading) return;
     if (rol === "cliente_arauco") router.replace("/cliente");
-  }, [rol, router, authLoading]);
+  }, [rol, router, authLoading, vistaCliente]);
 
   /** Solo superadmin: `null` = todos los centros. Resto de roles: siempre el centro del perfil. */
   const [centroFiltro, setCentroFiltro] = useState<string | null>(null);
@@ -186,13 +187,14 @@ export function DashboardPanel() {
   const centrosLabel =
     centrosPerfil.length > 0 ? centrosPerfil.map((c) => nombreCentro(c)).join(", ") : "—";
   const centroParaOt = useMemo(() => {
+    if (esClienteArauco) return null;
     if (rol === "tecnico") {
       if (centrosPerfil.length === 0) return null;
       return centrosPerfil.length === 1 ? centrosPerfil[0]! : [...centrosPerfil];
     }
     if (rol === "superadmin") return centroFiltro;
     return centroPerfil;
-  }, [rol, centrosPerfil, centroPerfil, centroFiltro]);
+  }, [esClienteArauco, rol, centrosPerfil, centroPerfil, centroFiltro]);
 
   // No disparar queries de trabajo hasta que el perfil esté cargado (evita query
   // con centro=null que puede dar permission-denied en Firestore para técnicos)
@@ -288,10 +290,24 @@ export function DashboardPanel() {
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.22em] text-muted">Resumen</p>
           <h1 className="mt-2 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-            {rol === "tecnico" ? "Tu panel" : "Panel operativo"}
+            {esClienteArauco ? "Panel Arauco" : rol === "tecnico" ? "Tu panel" : "Panel operativo"}
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
-            {rol === "tecnico" ? (
+            {esClienteArauco ? (
+              <>
+                Vista de <span className="font-medium text-foreground">solo lectura</span> consolidada en{" "}
+                <span className="font-medium text-foreground">todas las plantas</span>. Los gráficos usan las órdenes
+                más recientemente actualizadas en el sistema. Para el detalle semanal usá{" "}
+                <Link href="/programa" className="font-medium text-primary underline underline-offset-2">
+                  Programa semanal
+                </Link>
+                ; para cierre de período, el{" "}
+                <Link href="/reportes/cumplimiento" className="font-medium text-primary underline underline-offset-2">
+                  reporte de cumplimiento
+                </Link>
+                .
+              </>
+            ) : rol === "tecnico" ? (
               <>
                 Acá ves un vistazo de{" "}
                 <span className="font-medium text-foreground">tus órdenes asignadas</span> y de las que siguen{" "}
@@ -367,6 +383,32 @@ export function DashboardPanel() {
           No encontramos tu ficha de usuario en el sistema: por ahora se te trata como técnico sin planta asignada.
           Pedile a administración que complete tu perfil (centro y rol) o revisá que estés en el proyecto correcto.
         </p>
+      ) : null}
+
+      {esClienteArauco ? (
+        <div
+          className="rounded-xl border border-amber-200/80 bg-amber-50/60 px-4 py-3 text-sm text-amber-950 dark:border-amber-900/40 dark:bg-amber-950/25 dark:text-amber-100"
+          role="note"
+        >
+          <span className="font-semibold">Modo solo lectura.</span> Los gráficos e indicadores son informativos; no podés
+          crear ni modificar órdenes desde este panel.
+        </div>
+      ) : null}
+
+      {esClienteArauco && perfilListo && puede("reportes:ver_cumplimiento") ? (
+        <div
+          className="rounded-xl border border-border/80 bg-muted/30 px-4 py-3 text-sm leading-relaxed text-foreground"
+          role="note"
+        >
+          <span className="font-semibold text-foreground">Importante:</span> los gráficos de este panel usan solo las{" "}
+          <span className="font-mono tabular-nums">{DASHBOARD_RECENT_OT_LIMIT}</span> órdenes más recientemente{" "}
+          <span className="font-medium">actualizadas</span>, no todo el mes ni todo el histórico. Para cerrar números de
+          período, usá el{" "}
+          <Link href="/reportes/cumplimiento" className="font-medium text-primary underline underline-offset-2">
+            reporte de cumplimiento
+          </Link>
+          .
+        </div>
       ) : null}
 
       {esSupervisorOMas && perfilListo && puede("reportes:ver_cumplimiento") ? (
@@ -634,8 +676,11 @@ export function DashboardPanel() {
             <CardTitle>Cantidad de órdenes por estado</CardTitle>
             <CardDescription>
               Reparto en esta muestra. Entre paréntesis: número absoluto de órdenes.{" "}
-              <Link href="/tareas" className="font-medium text-primary underline-offset-2 hover:underline">
-                Ir a tareas
+              <Link
+                href={esClienteArauco ? "/programa" : "/tareas"}
+                className="font-medium text-primary underline-offset-2 hover:underline"
+              >
+                {esClienteArauco ? "Ir al programa" : "Ir a tareas"}
               </Link>
             </CardDescription>
           </CardHeader>
@@ -683,8 +728,11 @@ export function DashboardPanel() {
             <CardTitle>Cantidad de órdenes por tipo de trabajo</CardTitle>
             <CardDescription>
               Preventivo, correctivo, emergencia, etc. Sobre la misma muestra reciente.{" "}
-              <Link href="/tareas" className="font-medium text-primary underline-offset-2 hover:underline">
-                Ir a tareas
+              <Link
+                href={esClienteArauco ? "/programa" : "/tareas"}
+                className="font-medium text-primary underline-offset-2 hover:underline"
+              >
+                {esClienteArauco ? "Ir al programa" : "Ir a tareas"}
               </Link>
             </CardDescription>
           </CardHeader>

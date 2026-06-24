@@ -125,7 +125,7 @@ function materialLabel(m: MaterialOtListRow, esCliente?: boolean): string {
 export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) {
   const router = useRouter();
   const { user } = useAuthUser();
-  const { rol, puede } = usePermisos();
+  const { rol, puede, authLoading } = usePermisos();
   const esCliente = rol === "cliente_arauco";
   const { workOrder, loading, error } = useWorkOrderLive(workOrderId);
   const avisoIdLive = workOrder?.aviso_id?.trim() || undefined;
@@ -254,7 +254,7 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
     [],
   );
 
-  useOfflineSync(true, flushOutbox, {
+  useOfflineSync(!esCliente, flushOutbox, {
     onSyncStart: () => setSyncing(true),
     onSyncEnd: () => {
       setSyncing(false);
@@ -292,9 +292,11 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
   );
   const historialActorNames = useHistorialActorDisplayNames(historialActorUids);
 
+  const puedeVerOtCliente = puede("cliente:ver_ots");
   useEffect(() => {
-    if (esCliente) router.replace("/cliente");
-  }, [esCliente, router]);
+    if (authLoading) return;
+    if (esCliente && !puedeVerOtCliente) router.replace("/cliente");
+  }, [esCliente, puedeVerOtCliente, router, authLoading]);
 
   async function token(): Promise<string> {
     const t = await getClientIdToken();
@@ -559,7 +561,10 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
     }
   }
 
-  if (esCliente) {
+  if (esCliente && authLoading) {
+    return <p className="p-6 text-sm text-muted-foreground">Cargando…</p>;
+  }
+  if (esCliente && !puedeVerOtCliente) {
     return <p className="p-6 text-sm text-muted-foreground">Redirigiendo al panel…</p>;
   }
 
@@ -578,7 +583,9 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
           </CardHeader>
           <CardContent>
             <Button asChild variant="outline" size="sm">
-              <Link href="/tareas">Ir a OTs</Link>
+              <Link href={esCliente ? "/programa" : "/tareas"}>
+                {esCliente ? "Volver al programa" : "Ir a OTs"}
+              </Link>
             </Button>
           </CardContent>
         </Card>
@@ -638,7 +645,16 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
 
   return (
     <div className="space-y-6 pb-24">
-      {showOfflineBanner ? (
+      {esCliente ? (
+        <div
+          className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm leading-relaxed text-foreground"
+          role="status"
+        >
+          <span className="font-semibold">Solo lectura.</span> Podés consultar la orden y descargar el PDF si está
+          cerrada y firmada. No podés iniciar planillas, editar checklist, materiales ni ningún otro dato.
+        </div>
+      ) : null}
+      {showOfflineBanner && !esCliente ? (
         <div
           className={cn(
             "flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium",
@@ -694,9 +710,11 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
             >
               Ver en programa semanal
             </Link>
-            <Link href="/programa/correctivos" className="font-medium text-primary underline underline-offset-2">
-              Correctivos (Excel)
-            </Link>
+            {!esCliente ? (
+              <Link href="/programa/correctivos" className="font-medium text-primary underline underline-offset-2">
+                Correctivos (Excel)
+              </Link>
+            ) : null}
           </p>
         </div>
       ) : null}
@@ -1046,7 +1064,7 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
         </CardContent>
       </Card>
 
-      {showChecklist ? (
+      {showChecklist && !esCliente ? (
         <Card>
           <CardHeader>
             <CardTitle>Checklist</CardTitle>
@@ -1161,7 +1179,7 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
             readOnly={
               esCliente || planillaResp.status === "firmada" || cerrada || vista === "CANCELADA"
             }
-            iaEnabled={centroCfg.modulos.ia}
+            iaEnabled={!esCliente && centroCfg.modulos.ia}
             onCerrar={() => setPlanillaOpen(false)}
           />
         ) : (
@@ -1315,7 +1333,9 @@ export function WorkOrderDetailClient({ workOrderId }: { workOrderId: string }) 
       />
 
       <Button variant="outline" asChild>
-        <Link href="/tareas">Volver a OTs</Link>
+        <Link href={esCliente ? "/programa" : "/tareas"}>
+          {esCliente ? "Volver al programa" : "Volver a OTs"}
+        </Link>
       </Button>
 
       {corrFechaOpen ? (

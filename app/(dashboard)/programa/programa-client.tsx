@@ -1137,8 +1137,10 @@ function AvisoDrawer({
     aviso.workOrderId?.trim() ||
     avisoFb?.ultima_ejecucion_ot_id?.trim() ||
     undefined;
-  const buscarOtPorAvisoCerrado =
-    avisoFb?.estado === "CERRADO" && !ordenServicioExistenteId && !avisoFbLoading;
+  const buscarOtPorAvisoFallback =
+    !ordenServicioExistenteId &&
+    !avisoFbLoading &&
+    Boolean(avisoDocId?.trim() || aviso.numero?.trim());
   const centrosBusquedaOt = useMemo(() => {
     const c = avisoFb?.centro?.trim();
     return c ? [c] : [];
@@ -1147,8 +1149,8 @@ function AvisoDrawer({
     avisoDocId,
     avisoNumero: aviso.numero,
     centros: centrosBusquedaOt,
-    buscarEnTodasLasPlantas: centrosBusquedaOt.length === 0,
-    enabled: buscarOtPorAvisoCerrado,
+    buscarEnTodasLasPlantas: centrosBusquedaOt.length === 0 || !puedeCrearOt,
+    enabled: buscarOtPorAvisoFallback,
   });
   const ordenServicioIdEfectiva = ordenServicioExistenteId || otIdPorBusqueda;
   const avisoCerradoImportacionSinOt =
@@ -1188,6 +1190,7 @@ function AvisoDrawer({
 
   const etiquetaAbrirOtVinculada = (() => {
     if (woVinculadaLoading) return "Comprobando orden…";
+    if (!puedeCrearOt) return "Ver orden (solo lectura)";
     const st = woVinculada?.estado;
     if (st === "CERRADA" || st === "ANULADA") return "Ver orden";
     if (st === "EN_EJECUCION" || st === "PENDIENTE_FIRMA_SOLICITANTE" || st === "LISTA_PARA_CIERRE") {
@@ -1394,18 +1397,30 @@ function AvisoDrawer({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <div className="space-y-4 px-4 py-4 text-sm">
-          {!puedeCrearOt && ordenServicioIdEfectiva ? (
+          {!puedeCrearOt ? (
             <div className="space-y-2">
-              <Button className="w-full min-h-11 font-semibold" asChild disabled={woVinculadaLoading}>
-                <Link href={`/tareas/${encodeURIComponent(ordenServicioIdEfectiva)}`}>
-                  {etiquetaAbrirOtVinculada}
-                </Link>
-              </Button>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                {woVinculada?.estado === "CERRADA" || woVinculada?.estado === "ANULADA"
-                  ? "Esta orden ya está cerrada en el sistema."
-                  : "Desde acá iniciás o continuás la planilla de la orden vinculada a este aviso."}
-              </p>
+              {ordenServicioIdEfectiva ? (
+                <Button className="w-full min-h-11 font-semibold" asChild disabled={woVinculadaLoading}>
+                  <Link href={`/tareas/${encodeURIComponent(ordenServicioIdEfectiva)}`}>
+                    {etiquetaAbrirOtVinculada}
+                  </Link>
+                </Button>
+              ) : avisoDocId && (avisoFbLoading || otBusquedaLoading) ? (
+                <Button className="w-full min-h-11 font-semibold" type="button" disabled>
+                  Comprobando orden…
+                </Button>
+              ) : null}
+              {ordenServicioIdEfectiva ? (
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {woVinculada?.estado === "CERRADA" || woVinculada?.estado === "ANULADA"
+                    ? "Podés consultar la planilla y descargar el PDF desde el detalle de la orden."
+                    : "Desde el detalle podés seguir el avance de la orden vinculada (solo lectura)."}
+                </p>
+              ) : !avisoFbLoading && !otBusquedaLoading ? (
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Este aviso aún no tiene una orden de trabajo vinculada en el sistema.
+                </p>
+              ) : null}
             </div>
           ) : null}
           {ordenPreviaPendienteEfectiva ? (

@@ -1,6 +1,6 @@
 "use client";
 
-import { ClienteDashboardClient } from "@/app/(dashboard)/cliente/cliente-dashboard-client";
+import { DashboardPanel } from "@/app/dashboard/dashboard-panel";
 import { usePermisos } from "@/lib/permisos/usePermisos";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
@@ -25,5 +25,5 @@ export default function ClienteAraucoPage() {
     );
   }
 
-  return <ClienteDashboardClient />;
+  return <DashboardPanel vistaCliente />;
 }

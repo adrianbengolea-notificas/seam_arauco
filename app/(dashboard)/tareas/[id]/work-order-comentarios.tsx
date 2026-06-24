@@ -103,8 +103,9 @@ export function WorkOrderComentariosSection({ otId, viewerUid, puedeComentar, es
       </CardHeader>
       <CardContent className="space-y-4">
         {esCliente ? (
-          <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-950 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-100">
-            Estás viendo esta OT como Cliente Arauco. Solo podés agregar comentarios.
+          <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+            Vista de <span className="font-medium text-foreground">solo lectura</span>. No podés agregar comentarios ni
+            modificar la orden.
           </div>
         ) : null}
         {msg ? <p className="text-sm text-red-600">{msg}</p> : null}

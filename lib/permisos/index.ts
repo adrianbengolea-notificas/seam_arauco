@@ -101,6 +101,8 @@ const SUPERADMIN_EXTRA: Permiso[] = [
 
 const CLIENTE_ARAUCO: Permiso[] = [
   "cliente:ver_dashboard",
+  "cliente:ver_ots",
+  "cliente:descargar_pdf",
   "cliente:ver_programa",
   "cliente:ver_activos",
   /** Solo lectura: programa semanal publicado (`/programa`). */

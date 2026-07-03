@@ -482,7 +482,8 @@ async function commitCalendarioMesesPreventivos(input: {
       );
       continue;
     }
-    mesesPorId.set(id, [...mesesRaw].sort((a, b) => a - b));
+    const prev = mesesPorId.get(id) ?? [];
+    mesesPorId.set(id, [...new Set([...prev, ...mesesRaw])].sort((a, b) => a - b));
   }
 
   const mergePayloads: Array<{ id: string; data: Record<string, unknown> }> = [...mesesPorId.entries()].map(

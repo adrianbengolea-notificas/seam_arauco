@@ -20,6 +20,7 @@ import { getAdminDb } from "../firebase/firebaseAdmin";
 import {
   deriveCentroFromEquipmentCode,
   deriveCentroPlantCodeFromUbicacionTecnica,
+  resolveCentroForAviso,
 } from "../lib/firestore/derive-centro";
 
 const CHUNK = 400;
@@ -79,10 +80,19 @@ async function migrateAssets(dryRun: boolean): Promise<void> {
 async function migrateAvisos(dryRun: boolean): Promise<void> {
   const db = getAdminDb();
   const col = db.collection("avisos");
+  const assetsCol = db.collection("assets");
 
   console.log("\n=== avisos ===");
-  const snap = await col.get();
+  const [snap, assetsSnap] = await Promise.all([col.get(), assetsCol.get()]);
   console.log(`  Total documentos: ${snap.size}`);
+
+  const assetMetaById = new Map<string, { centro: string; codigo: string }>();
+  for (const d of assetsSnap.docs) {
+    assetMetaById.set(d.id, {
+      centro: String(d.get("centro") ?? "").trim(),
+      codigo: String(d.get("codigo_nuevo") ?? "").trim(),
+    });
+  }
 
   const toUpdate: { id: string; oldCentro: string; newCentro: string }[] = [];
   const sinResolver: string[] = [];
@@ -91,13 +101,20 @@ async function migrateAvisos(dryRun: boolean): Promise<void> {
     const data = doc.data();
     const currentCentro: string = (data["centro"] ?? "").trim();
     const ut: string = (data["ubicacion_tecnica"] ?? "").trim();
+    const assetId = String(data["asset_id"] ?? "").trim();
+    const meta = assetId ? assetMetaById.get(assetId) : undefined;
 
-    if (!ut) {
-      sinResolver.push(`${doc.id} (centro="${currentCentro || "—"}", sin UT)`);
+    if (!ut && !meta?.codigo) {
+      sinResolver.push(`${doc.id} (centro="${currentCentro || "—"}", sin UT ni activo)`);
       continue;
     }
 
-    const newCentro = deriveCentroPlantCodeFromUbicacionTecnica(ut);
+    const newCentro = resolveCentroForAviso({
+      rawCentro: currentCentro,
+      ut,
+      codigoEquipo: meta?.codigo,
+      assetCentro: meta?.centro,
+    });
     if (newCentro !== currentCentro) {
       toUpdate.push({ id: doc.id, oldCentro: currentCentro, newCentro });
     }

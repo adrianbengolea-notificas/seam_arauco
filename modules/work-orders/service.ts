@@ -194,6 +194,7 @@ export async function createWorkOrderFromAviso(input: {
     const avisoNumero = nOtDesdeNumeroAviso(avisoFresh.n_aviso);
     n_ot = avisoNumero;
     const especialidadOt: Especialidad = asset?.especialidad_predeterminada ?? avisoFresh.especialidad;
+    const centroEfectivo = (asset?.centro?.trim() || avisoFresh.centro.trim()) || avisoFresh.centro;
 
     const fechaProg = (
       fechaInicioEfectiva !== undefined
@@ -209,7 +210,7 @@ export async function createWorkOrderFromAviso(input: {
       asset_id: asset?.id ?? "",
       codigo_activo_snapshot: asset?.codigo_nuevo ?? "",
       ubicacion_tecnica: avisoFresh.ubicacion_tecnica,
-      centro: avisoFresh.centro,
+      centro: centroEfectivo,
       frecuencia: avisoFresh.frecuencia,
       especialidad: especialidadOt,
       tipo_trabajo: avisoFresh.tipo,
@@ -234,6 +235,9 @@ export async function createWorkOrderFromAviso(input: {
       work_order_id: woId,
       updated_at: FieldValue.serverTimestamp(),
     };
+    if (asset?.centro?.trim() && asset.centro.trim() !== avisoFresh.centro.trim()) {
+      avisoPatch.centro = asset.centro.trim();
+    }
     if (!avisoFresh.clave_mantenimiento?.trim()) {
       avisoPatch.clave_mantenimiento = claveMantenimiento;
     }

@@ -3,6 +3,7 @@
 import { actionEditAviso } from "@/app/actions/avisos";
 import { actionAddAvisoToProgramaPublicado } from "@/app/actions/schedule";
 import { PasoImportacionAvisos } from "@/components/importacion/paso-importacion-avisos";
+import { PasoImportacionParcheMensuales } from "@/components/importacion/paso-importacion-parche-mensuales";
 import type { ResultadoImportacionAvisos } from "@/lib/importaciones/avisos-excel-admin";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -57,7 +58,8 @@ const TAB_DEFS: {
   {
     id: "mensuales_parche",
     label: "Parche mensuales",
-    description: "Reimportar estado/fecha de mensuales (MENSUALES_*.xlsx).",
+    description:
+      "MENSUALES_*.xlsx — actualiza estado/fecha/centro. También en Importación (Excel) → paso 5.",
   },
   { id: "semanal_info", label: "Aviso semanal (futuro)", description: "", hidden: true },
 ];
@@ -594,44 +596,94 @@ export function ConfiguracionImportacionClient() {
               .
             </p>
 
-            <div className="space-y-4">
-              <h2 className="text-sm font-semibold text-foreground">Carga de preventivos (maestro + calendario M/T)</h2>
-              <PasoImportacionAvisos
-                paso={1}
-                tab="listado_semestral_anual"
-                tituloArchivo="Listado_avisos_Semestral-Anual.xlsx"
-                descripcionArchivo="Export SAP con una sola hoja y la columna CePl (centro). Carga los avisos semestrales y anuales con el centro correcto (PT01, PC01, PM02…)."
-                user={user}
-                puedeImportar={puedeImportar}
-                onImportado={recargarLista}
-              />
-              <PasoImportacionAvisos
-                paso={2}
-                tab="preventivos_todas"
-                tituloArchivo="AVISOS PREVENTIVOS Abril 26 - Marzo 27.xlsx"
-                descripcionArchivo="Maestro con hojas MEN / TRIM / SEM / ANU. Los meses del calendario anual para mensual y trimestral no se generan acá: deben venir de los Excel de Arauco (pasos 3 y 4). Semestral/anual pueden seguir usando columnas de mes en este archivo."
-                user={user}
-                puedeImportar={puedeImportar}
-                onImportado={recargarLista}
-              />
-              <PasoImportacionAvisos
-                paso={3}
-                tab="calendario_mensual"
-                tituloArchivo="Calendario_avisos_MENSUAL_Arauco.xlsx"
-                descripcionArchivo="Planilla oficial con nº de aviso SAP y marcas en columnas de mes (enero…diciembre). Solo actualiza meses en avisos ya cargados con frecuencia mensual; no crea avisos nuevos."
-                user={user}
-                puedeImportar={puedeImportar}
-                onImportado={recargarLista}
-              />
-              <PasoImportacionAvisos
-                paso={4}
-                tab="calendario_trimestral"
-                tituloArchivo="Calendario_avisos_TRIMESTRAL_Arauco.xlsx"
-                descripcionArchivo="Igual que el mensual pero para hoja trimestral: marcas en meses y nº de aviso. Solo actualiza avisos trimestrales existentes."
-                user={user}
-                puedeImportar={puedeImportar}
-                onImportado={recargarLista}
-              />
+            <div className="space-y-6">
+              <section className="space-y-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-foreground">A — Carga inicial del período</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Una vez al inicio del año de mantenimiento. Crea el catálogo de avisos en la base de datos.
+                  </p>
+                </div>
+                <div className="space-y-4">
+                  <PasoImportacionAvisos
+                    paso={1}
+                    tituloPaso="Semestrales y anuales"
+                    tab="listado_semestral_anual"
+                    tituloArchivo="Listado_avisos_Semestral-Anual.xlsx"
+                    descripcionArchivo="Export SAP con una sola hoja y columna CePl (centro). Carga avisos semestrales y anuales."
+                    cuandoUsarlo="Al comienzo del período, antes del maestro de preventivos."
+                    grupo="inicial"
+                    user={user}
+                    puedeImportar={puedeImportar}
+                    onImportado={recargarLista}
+                  />
+                  <PasoImportacionAvisos
+                    paso={2}
+                    tituloPaso="Maestro de preventivos (M · T · S · A)"
+                    tab="preventivos_todas"
+                    tituloArchivo="AVISOS PREVENTIVOS Abril 26 - Marzo 27.xlsx"
+                    descripcionArchivo="Excel SAP con hojas MEN, TRIM, SEM y ANU. Crea o actualiza todos los preventivos del catálogo (nº aviso, descripción, UT, frecuencia, centro)."
+                    cuandoUsarlo="Después del paso 1. Obligatorio antes del calendario mensual/trimestral."
+                    noConfundir="«Abril 26 – Marzo 27» es el nombre del período anual del plan, no los meses que cargás acá. No reemplaza al calendario Arauco (paso 3) ni al parche mensual (paso 5)."
+                    grupo="inicial"
+                    user={user}
+                    puedeImportar={puedeImportar}
+                    onImportado={recargarLista}
+                  />
+                </div>
+              </section>
+
+              <section className="space-y-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-foreground">B — Calendario anual Arauco</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Después del maestro (paso 2). Indica en qué meses del año corre cada preventivo mensual o trimestral.
+                    No crea avisos nuevos.
+                  </p>
+                </div>
+                <div className="space-y-4">
+                  <PasoImportacionAvisos
+                    paso={3}
+                    tituloPaso="Calendario mensual Arauco"
+                    tab="calendario_mensual"
+                    tituloArchivo="Calendario_avisos_MENSUAL_Arauco.xlsx"
+                    descripcionArchivo="Planilla con Descripción, Ubicación técnica y columnas de mes (ENERO…DICIEMBRE) donde va el nº de aviso SAP de cada mes. El sistema detecta este formato automáticamente."
+                    cuandoUsarlo="Tras cargar el maestro. Actualiza el programa anual de avisos mensuales."
+                    noConfundir="No es para avisos nuevos del mes en curso — eso es el paso 5 (Parche mensuales)."
+                    grupo="calendario"
+                    user={user}
+                    puedeImportar={puedeImportar}
+                    onImportado={recargarLista}
+                  />
+                  <PasoImportacionAvisos
+                    paso={4}
+                    tituloPaso="Calendario trimestral Arauco"
+                    tab="calendario_trimestral"
+                    tituloArchivo="Calendario_avisos_TRIMESTRAL_Arauco.xlsx"
+                    descripcionArchivo="Misma lógica que el mensual, en hoja trimestral: nº SAP en columnas de mes o columna Aviso con marcas X."
+                    cuandoUsarlo="Tras el maestro, para avisos con frecuencia trimestral (T)."
+                    grupo="calendario"
+                    user={user}
+                    puedeImportar={puedeImportar}
+                    onImportado={recargarLista}
+                  />
+                </div>
+              </section>
+
+              <section className="space-y-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-foreground">C — Actualización mensual (operativa)</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Cada mes, cuando SAP emite avisos nuevos. Es el flujo que usaste en abril y mayo.
+                  </p>
+                </div>
+                <PasoImportacionParcheMensuales
+                  paso={5}
+                  user={user}
+                  puedeImportar={puedeImportar}
+                  onImportado={recargarLista}
+                />
+              </section>
             </div>
           </div>
         ) : (
@@ -675,6 +727,10 @@ export function ConfiguracionImportacionClient() {
             {/* Mensuales parche: legacy upload inside the tab panel */}
             {tab === "mensuales_parche" ? (
               <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Este mismo cargador está en{" "}
+                  <strong className="text-foreground/90">Importación (Excel) → sección C → paso 5</strong>.
+                </p>
                 <p className="text-xs font-medium text-muted-foreground">Archivo MENSUALES_*.xlsx</p>
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                   <input

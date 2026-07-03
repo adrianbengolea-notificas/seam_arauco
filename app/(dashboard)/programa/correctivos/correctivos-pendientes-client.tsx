@@ -193,6 +193,7 @@ export function CorrectivosPendientesClient() {
           <h2 className="text-sm font-semibold text-foreground">Carga semanal (Excel)</h2>
           <PasoImportacionAvisos
             paso={1}
+            tituloPaso="Correctivos de la semana"
             variant="correctivos"
             tab="correctivos"
             tituloArchivo="CORRECTIVOS-JUNIO 2026.xlsx (ejemplo)"

@@ -242,25 +242,37 @@ function CommitPanel({ summary }: { summary: CommitSummaryImportacion }) {
   );
 }
 
+type GrupoImportacionPaso = "inicial" | "calendario" | "correctivos";
+
 export function PasoImportacionAvisos({
   paso,
+  tituloPaso,
   tituloArchivo,
   descripcionArchivo,
+  cuandoUsarlo,
+  noConfundir,
   tab,
   user,
   puedeImportar,
   onImportado,
   variant = "default",
+  grupo,
 }: {
-  paso: 1 | 2 | 3 | 4;
+  paso: number;
+  /** Título legible del paso (no el nombre del archivo). */
+  tituloPaso: string;
+  /** Nombre de archivo de ejemplo (referencia). */
   tituloArchivo: string;
   descripcionArchivo: string;
+  cuandoUsarlo?: string;
+  noConfundir?: string;
   tab: ModoImportacionAvisos;
   user: { uid: string } | null | undefined;
   puedeImportar: boolean;
   onImportado?: () => void;
   /** `correctivos` usa estilo ámbar para la carga semanal en Programa. */
   variant?: "default" | "correctivos";
+  grupo?: GrupoImportacionPaso;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [centroForzado, setCentroForzado] = useState<string>("");
@@ -319,16 +331,19 @@ export function PasoImportacionAvisos({
     }
   }, [centroForzado, onImportado, parsePreview, puedeImportar, tab, user]);
 
+  const grupoEfectivo: GrupoImportacionPaso =
+    variant === "correctivos" ? "correctivos" : (grupo ?? (paso <= 2 ? "inicial" : "calendario"));
+
   const stepBg =
-    variant === "correctivos"
+    grupoEfectivo === "correctivos"
       ? "bg-amber-500/10 border-amber-500/30"
-      : paso === 1
+      : grupoEfectivo === "inicial"
         ? "bg-sky-500/10 border-sky-500/30"
         : "bg-violet-500/10 border-violet-500/30";
   const stepBadge =
-    variant === "correctivos"
+    grupoEfectivo === "correctivos"
       ? "bg-amber-600 text-white"
-      : paso === 1
+      : grupoEfectivo === "inicial"
         ? "bg-sky-600 text-white"
         : "bg-violet-600 text-white";
 
@@ -343,11 +358,23 @@ export function PasoImportacionAvisos({
         >
           {paso}
         </span>
-        <div className="space-y-0.5">
-          <p className="text-sm font-semibold text-foreground">
-            Archivo: <span className="font-mono font-medium">{tituloArchivo}</span>
-          </p>
+        <div className="space-y-1.5">
+          <p className="text-sm font-semibold text-foreground">{tituloPaso}</p>
           <p className="text-xs text-muted-foreground leading-relaxed">{descripcionArchivo}</p>
+          {cuandoUsarlo ? (
+            <p className="text-xs text-muted-foreground">
+              <span className="font-medium text-foreground/80">Cuándo:</span> {cuandoUsarlo}
+            </p>
+          ) : null}
+          <p className="text-xs text-muted-foreground">
+            Archivo de ejemplo:{" "}
+            <span className="font-mono text-foreground/80">{tituloArchivo}</span>
+          </p>
+          {noConfundir ? (
+            <p className="rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-950 dark:text-amber-100">
+              {noConfundir}
+            </p>
+          ) : null}
         </div>
       </div>
 

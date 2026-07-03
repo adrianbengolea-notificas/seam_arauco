@@ -149,11 +149,30 @@ function pickSheet(wb: XLSX.WorkBook, soloHoja?: string | null): { name: string;
   return { name: first, sheet };
 }
 
+/**
+ * Formato calendario ancho (Excel Arauco): sin columna «Aviso»; el nº SAP de cada mes va
+ * en la columna correspondiente (ABRIL, MAYO…).
+ */
+function isWideCalendarHeader(byField: Record<string, string | null>, headerCells: string[]): boolean {
+  if (byField.numero != null) return false;
+  if (byField.descripcion == null || byField.ubicacionTecnica == null) return false;
+  return parseMonthColumnIndices(headerCells).size > 0;
+}
+
+/** Marca de mes clásica (X, 1, SI…) — distinta de un nº de aviso SAP en formato ancho. */
+function isMonthMarkCell(raw: unknown): boolean {
+  const v = String(raw ?? "").trim();
+  if (!v || v === "0") return false;
+  if (normalizeNumeroAviso(raw)) return false;
+  return true;
+}
+
 function findHeaderRow(matrix: Matrix): number {
   for (let r = 0; r < Math.min(matrix.length, 45); r++) {
     const headers = (matrix[r] ?? []).map((c) => String(c ?? ""));
     const { byField } = mapHeaders(headers);
     if (byField.numero != null) return r;
+    if (isWideCalendarHeader(byField, headers)) return r;
   }
   return -1;
 }
@@ -261,7 +280,8 @@ export async function parseAvisosExcel(
       columnasMapeadas: {},
       columnasNoReconocidas: [],
       tipoDetectado: "desconocido",
-      fatal: "No se encontró una fila de encabezados con columna de número de aviso.",
+      fatal:
+        "No se encontró fila de encabezados (columna «Aviso» o formato calendario ancho con descripción, ubicación técnica y meses).",
       hojasProcesadas: [picked.name],
     };
   }
@@ -269,7 +289,9 @@ export async function parseAvisosExcel(
   const headerCells = (matrix[hr] ?? []).map((c) => String(c ?? ""));
   const headerMap = mapHeaders(headerCells);
   const monthCols = parseMonthColumnIndices(headerCells);
-  if (headerMap.byField.numero == null) {
+  const wideCalendar = isWideCalendarHeader(headerMap.byField, headerCells);
+
+  if (headerMap.byField.numero == null && !wideCalendar) {
     return {
       avisos: [],
       errores: [],
@@ -277,7 +299,7 @@ export async function parseAvisosExcel(
       columnasMapeadas: compactMapped(headerMap),
       columnasNoReconocidas: listUnmappedColumnHeaders(headerCells, headerMap.indices),
       tipoDetectado: "desconocido",
-      fatal: "No se encontró columna de número de aviso.",
+      fatal: "No se encontró columna de número de aviso ni formato calendario ancho (meses con nº SAP).",
       hojasProcesadas: [picked.name],
     };
   }
@@ -298,20 +320,90 @@ export async function parseAvisosExcel(
     };
   }
 
-  let tipoDetectado = detectTipoSheet(matrix, hr, idx);
+  let tipoDetectado: ParseResult["tipoDetectado"] = wideCalendar
+    ? "preventivos"
+    : detectTipoSheet(matrix, hr, idx);
   if (opciones.tipoForzado) {
     tipoDetectado = opciones.tipoForzado === "correctivo" ? "correctivos" : "preventivos";
   }
 
   const omitirFrec = opciones.omitirFrecuencia === true;
 
+  if (wideCalendar) {
+    advertencias.push({
+      fila: 0,
+      mensaje:
+        "Formato calendario ancho detectado: el nº de aviso SAP va en cada columna de mes (ABRIL, MAYO…), sin columna «Aviso».",
+    });
+  }
+
   for (let r = hr + 1; r < matrix.length; r++) {
     const line = matrix[r] ?? [];
     const excelRow = r + 1;
-    const numeroRaw = cellRaw(line, idx.numero);
-    const numero = normalizeNumeroAviso(numeroRaw);
     const descripcion = cellStr(line, iDesc);
     const ut = cellStr(line, iUt);
+
+    if (wideCalendar) {
+      if (!descripcion && !ut) continue;
+
+      const denomWide = cellStr(line, idx.denomUbicTecnica);
+      const espRawWide = cellStr(line, idx.especialidad);
+      const frecRawWide = omitirFrec ? "" : cellStr(line, idx.frecuencia);
+      const centroRawWide = cellStr(line, idx.centro);
+      const ptoRawWide = cellStr(line, idx.ptoTrbRes);
+
+      let espWide = normalizeEspecialidad(espRawWide || null);
+      if (!espWide && ptoRawWide.trim()) espWide = normalizeEspecialidad(ptoRawWide);
+      if (!espWide && opciones.inferirEspecialidadDesdeContexto) {
+        espWide = inferEspecialidadDesdeDescripcionYPto(descripcion, ptoRawWide);
+      }
+
+      let frecWide = omitirFrec ? null : normalizeFrecuencia(frecRawWide || null);
+      if (!frecWide && opciones.frecuenciaForzada) frecWide = opciones.frecuenciaForzada;
+
+      const tipoFilaWide: "preventivo" | "correctivo" = opciones.tipoForzado ?? "preventivo";
+      let emittedAny = false;
+
+      for (const [colIdx, monthNum] of monthCols) {
+        const numero = normalizeNumeroAviso(cellRaw(line, colIdx));
+        if (!numero) continue;
+        emittedAny = true;
+
+        avisos.push({
+          numero,
+          descripcion,
+          ubicacionTecnica: ut,
+          denomUbicTecnica: denomWide || undefined,
+          especialidad: espWide ?? undefined,
+          frecuencia: omitirFrec ? undefined : frecWide ?? undefined,
+          tipo: tipoFilaWide,
+          centro: centroRawWide || undefined,
+          ptoTrbRes: ptoRawWide || undefined,
+          meses_programados: [monthNum],
+        });
+      }
+
+      if (!emittedAny && (descripcion || ut)) {
+        if (opciones.mtCalendarioExigeMarcasMes) {
+          errores.push({
+            fila: excelRow,
+            campo: "meses_programados",
+            valor: "",
+            motivo:
+              "Fila sin nº de aviso en ninguna columna de mes. En formato ancho, cada mes debe tener el nº SAP correspondiente.",
+          });
+        } else {
+          advertencias.push({
+            fila: excelRow,
+            mensaje: `Fila ${excelRow}: sin nº de aviso en columnas de mes; se omite.`,
+          });
+        }
+      }
+      continue;
+    }
+
+    const numeroRaw = cellRaw(line, idx.numero);
+    const numero = normalizeNumeroAviso(numeroRaw);
 
     if (!numero && !descripcion && !ut) continue;
 
@@ -424,8 +516,7 @@ export async function parseAvisosExcel(
     const mesesDesdeMarcas: number[] = [];
     if (monthCols.size > 0) {
       for (const [colIdx, monthNum] of monthCols) {
-        const v = String(line[colIdx] ?? "").trim();
-        if (v && v !== "0") mesesDesdeMarcas.push(monthNum);
+        if (isMonthMarkCell(line[colIdx])) mesesDesdeMarcas.push(monthNum);
       }
     }
     if (mesesDesdeMarcas.length) {

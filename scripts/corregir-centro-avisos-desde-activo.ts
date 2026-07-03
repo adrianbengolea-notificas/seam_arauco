@@ -20,6 +20,7 @@ loadEnv({ path: ".env.local", override: true });
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/firebase/firebaseAdmin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { ensurePlansForCentro } from "@/lib/plan-mantenimiento/admin";
 
 const CHUNK = 400;
 
@@ -131,6 +132,7 @@ async function main() {
 
   const BATCH_MAX = 450;
   let n = 0;
+  const centrosDestino = new Set<string>();
   for (let i = 0; i < ok.length; i += BATCH_MAX) {
     const slice = ok.slice(i, i + BATCH_MAX);
     const batch = db.batch();
@@ -139,13 +141,28 @@ async function main() {
         centro: p.a,
         updated_at: FieldValue.serverTimestamp(),
       });
+      const planRef = db.collection(COLLECTIONS.plan_mantenimiento).doc(p.avisoId);
+      const planSnap = await planRef.get();
+      if (planSnap.exists) {
+        batch.update(planRef, {
+          centro: p.a,
+          updated_at: FieldValue.serverTimestamp(),
+        });
+      }
+      centrosDestino.add(p.a);
+      centrosDestino.add(p.de);
     }
     await batch.commit();
     n += slice.length;
-    console.log(`Commit lote: ${slice.length} (total ${n}/${ok.length})`);
+    console.log(`Commit lote avisos/planes: ${slice.length} (total ${n}/${ok.length})`);
   }
 
-  console.log("Listo. Revisá planes/vencimientos si aplica; el centro del aviso afecta consultas por planta.");
+  for (const c of centrosDestino) {
+    const r = await ensurePlansForCentro(c);
+    console.log(`ensurePlansForCentro(${c}): ${r.upserts} planes sincronizados`);
+  }
+
+  console.log("Listo. Avisos, planes y vencimientos alineados con el centro del activo.");
 }
 
 main().catch((e) => {

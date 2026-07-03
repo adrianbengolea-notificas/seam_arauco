@@ -36,6 +36,14 @@ const EQUIP_PREFIX_TO_CENTRO: Readonly<Record<string, string>> = {
   PT01: "PT01",
 };
 
+const VALID_PLANT_CENTRO_CODES = new Set(Object.values(EQUIP_PREFIX_TO_CENTRO));
+
+function isPlantCentroCode(c: string): boolean {
+  const t = c.trim();
+  if (!t) return false;
+  return isCentroInKnownList(t) || VALID_PLANT_CENTRO_CODES.has(t);
+}
+
 export function deriveCentroFromEquipmentCode(codigo: string): string | null {
   const t = codigo.trim().toUpperCase();
   for (const [prefix, centro] of Object.entries(EQUIP_PREFIX_TO_CENTRO)) {
@@ -62,4 +70,26 @@ export function normalizeCentro(raw: string, ut: string, codigo?: string): strin
     if (fromCode) return fromCode;
   }
   return deriveCentroPlantCodeFromUbicacionTecnica(ut);
+}
+
+/**
+ * Resuelve el centro de un aviso con prioridad:
+ * 1. `centroForzado` (importación manual / script).
+ * 2. `centro` del activo vinculado en maestros (fuente de verdad operativa).
+ * 3. `normalizeCentro` (código SAP del equipo, luego prefijo UT).
+ *
+ * Evita clasificar equipos PM02* en PF01 solo porque la UT empieza con BOSS-.
+ */
+export function resolveCentroForAviso(input: {
+  rawCentro?: string;
+  ut: string;
+  codigoEquipo?: string;
+  assetCentro?: string;
+  centroForzado?: string;
+}): string {
+  const forzado = input.centroForzado?.trim();
+  if (forzado && isPlantCentroCode(forzado)) return forzado;
+  const ac = input.assetCentro?.trim();
+  if (ac && isPlantCentroCode(ac)) return ac;
+  return normalizeCentro(input.rawCentro ?? "", input.ut, input.codigoEquipo);
 }

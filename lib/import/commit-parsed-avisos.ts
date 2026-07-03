@@ -5,7 +5,7 @@ import { assetIdImportDesdeEspecialidad } from "@/lib/assets/synthetic-gral-asse
 import { AppError } from "@/lib/errors/app-error";
 import { getAdminDb } from "@/firebase/firebaseAdmin";
 import { isCentroInKnownList } from "@/lib/config/app-config";
-import { normalizeCentro } from "@/lib/firestore/derive-centro";
+import { normalizeCentro, resolveCentroForAviso } from "@/lib/firestore/derive-centro";
 import { ASSETS_COLLECTION, AVISOS_COLLECTION } from "@/lib/firestore/collections";
 import { ensurePlansForCentro } from "@/lib/plan-mantenimiento/admin";
 import {
@@ -294,6 +294,8 @@ type UbicacionAssetLookup = {
   utToAsset: Map<string, string>;
   /** `codigo_nuevo` por id de documento en `assets` — alinea `centro` del aviso con la misma regla que el maestro (prefijo PM02/PF01/… en el código). */
   codigoNuevoByAssetId: Map<string, string>;
+  /** `centro` del activo en maestros — prioridad sobre UT (BOSS→PF01 vs PM02). */
+  centroByAssetId: Map<string, string>;
   /** `especialidad_predeterminada` por id de documento (solo valores de dominio). */
   especialidadPredeterminadaByAssetId: Map<string, Especialidad>;
 };
@@ -303,16 +305,37 @@ async function loadUbicacionToAssetLookup(): Promise<UbicacionAssetLookup> {
   const snap = await db.collection(ASSETS_COLLECTION).get();
   const utToAsset = buildUbicacionToAssetIdLookup(snap.docs);
   const codigoNuevoByAssetId = new Map<string, string>();
+  const centroByAssetId = new Map<string, string>();
   const especialidadPredeterminadaByAssetId = new Map<string, Especialidad>();
   for (const d of snap.docs) {
     const codigo = String(d.get("codigo_nuevo") ?? "").trim();
     if (codigo) codigoNuevoByAssetId.set(d.id, codigo);
+    const centro = String(d.get("centro") ?? "").trim();
+    if (centro) centroByAssetId.set(d.id, centro);
     const esp = d.get("especialidad_predeterminada");
     if (esp === "AA" || esp === "ELECTRICO" || esp === "GG" || esp === "HG") {
       especialidadPredeterminadaByAssetId.set(d.id, esp);
     }
   }
-  return { utToAsset, codigoNuevoByAssetId, especialidadPredeterminadaByAssetId };
+  return { utToAsset, codigoNuevoByAssetId, centroByAssetId, especialidadPredeterminadaByAssetId };
+}
+
+function centroAvisoDesdeFila(
+  row: { centro?: string },
+  ut: string,
+  assetId: string,
+  lookup: Pick<UbicacionAssetLookup, "codigoNuevoByAssetId" | "centroByAssetId">,
+  centroForzado?: string,
+): string {
+  const codigoEquipo = assetId ? lookup.codigoNuevoByAssetId.get(assetId) : undefined;
+  const assetCentro = assetId ? lookup.centroByAssetId.get(assetId) : undefined;
+  return resolveCentroForAviso({
+    centroForzado,
+    rawCentro: row.centro ?? "",
+    ut,
+    codigoEquipo,
+    assetCentro,
+  });
 }
 
 async function quitarEstadoSiHayOrdenAbierta(
@@ -404,7 +427,8 @@ async function commitCalendarioMesesPreventivos(input: {
     input.modo === "calendario_mensual" ? "MENSUAL" : "TRIMESTRAL";
   const mtsaExpected: "M" | "T" = input.modo === "calendario_mensual" ? "M" : "T";
 
-  const { utToAsset, codigoNuevoByAssetId } = await loadUbicacionToAssetLookup();
+  const { utToAsset, codigoNuevoByAssetId, centroByAssetId } = await loadUbicacionToAssetLookup();
+  const lookup = { codigoNuevoByAssetId, centroByAssetId };
 
   const idsToFetch = new Set<string>();
   for (const row of input.rows) {
@@ -431,11 +455,9 @@ async function commitCalendarioMesesPreventivos(input: {
     const ut = (row.ubicacionTecnica ?? "").trim();
     let assetId = resolveAssetIdFromLookup(utToAsset, ut) ?? "";
     const espCode = defaultEspecialidadCode(row);
-    const cen = input.centroForzado?.trim() || normalizeCentro(row.centro ?? "", ut);
+    const cen = centroAvisoDesdeFila(row, ut, assetId, lookup, input.centroForzado);
     assetId = assetIdImportDesdeEspecialidad(espCode, cen, assetId);
-    const codigoEquipo = assetId ? codigoNuevoByAssetId.get(assetId) : undefined;
-    const centroObjetivo =
-      input.centroForzado?.trim() || normalizeCentro(row.centro ?? "", ut, codigoEquipo);
+    const centroObjetivo = centroAvisoDesdeFila(row, ut, assetId, lookup, input.centroForzado);
     const centroKey = centroObjetivo.trim();
     const tgt = normalizeNAvisoCompare(numero);
     const cands = [
@@ -526,8 +548,9 @@ export async function commitParsedAvisoRows(input: {
 }): Promise<CommitImportResult> {
   void input.actorUid;
   const errores: string[] = [];
-  const { utToAsset, codigoNuevoByAssetId, especialidadPredeterminadaByAssetId } =
+  const { utToAsset, codigoNuevoByAssetId, especialidadPredeterminadaByAssetId, centroByAssetId } =
     await loadUbicacionToAssetLookup();
+  const lookup = { codigoNuevoByAssetId, centroByAssetId };
   let sinActivoUt = 0;
   const utSinActivoKeys = new Set<string>();
 
@@ -544,6 +567,7 @@ export async function commitParsedAvisoRows(input: {
       input.rows,
       utToAsset,
       codigoNuevoByAssetId,
+      centroByAssetId,
       especialidadPredeterminadaByAssetId,
       errores,
       utSinActivoKeys,
@@ -572,11 +596,11 @@ export async function commitParsedAvisoRows(input: {
     let assetId = resolveAssetIdFromLookup(utToAsset, ut) ?? "";
     const espCode = defaultEspecialidadCode(row);
     let esp = especialidadImportToDominio(espCode);
-    const codigoEquipo = assetId ? codigoNuevoByAssetId.get(assetId) : undefined;
-    const centro = input.centroForzado?.trim() || normalizeCentro(row.centro ?? "", ut, codigoEquipo);
+    const centroPrelim = centroAvisoDesdeFila(row, ut, assetId, lookup, input.centroForzado);
     const denom = (row.denomUbicTecnica ?? "").trim();
 
-    assetId = assetIdImportDesdeEspecialidad(espCode, centro, assetId);
+    assetId = assetIdImportDesdeEspecialidad(espCode, centroPrelim, assetId);
+    const centro = centroAvisoDesdeFila(row, ut, assetId, lookup, input.centroForzado);
 
     if (assetId) {
       const espExplicita = especialidadExplicitaDesdeTexto(descripcion);
@@ -717,11 +741,13 @@ async function commitListadoSemestralAnual(
   rows: ParsedAvisoRow[],
   utToAsset: Map<string, string>,
   codigoNuevoByAssetId: Map<string, string>,
+  centroByAssetId: Map<string, string>,
   especialidadPredeterminadaByAssetId: Map<string, Especialidad>,
   errores: string[],
   utSinActivoKeys: Set<string>,
   centroForzado?: string,
 ): Promise<CommitImportResult> {
+  const lookup = { codigoNuevoByAssetId, centroByAssetId };
   type Prepared =
     | { kind: "freq"; id: string; data: Record<string, unknown> }
     | { kind: "full"; id: string; data: Record<string, unknown> };
@@ -745,9 +771,9 @@ async function commitListadoSemestralAnual(
     const freq = mtsaToFrecuencia(mtsa);
     const espCode = defaultEspecialidadCode(row);
     let esp = especialidadImportToDominio(espCode);
-    const codigoEquipo = assetId ? codigoNuevoByAssetId.get(assetId) : undefined;
-    const centro = centroForzado?.trim() || normalizeCentro(row.centro ?? "", ut, codigoEquipo);
-    assetId = assetIdImportDesdeEspecialidad(espCode, centro, assetId);
+    const centroPrelim = centroAvisoDesdeFila(row, ut, assetId, lookup, centroForzado);
+    assetId = assetIdImportDesdeEspecialidad(espCode, centroPrelim, assetId);
+    const centro = centroAvisoDesdeFila(row, ut, assetId, lookup, centroForzado);
     if (assetId) {
       const espExplicita = especialidadExplicitaDesdeTexto(descripcion);
       esp = espExplicita ?? especialidadConPreferenciaCatalogoGg(assetId, esp, especialidadPredeterminadaByAssetId);

@@ -49,4 +49,36 @@ describe("resolveCentroForAviso", () => {
       }),
     ).toBe("PM02");
   });
+
+  it("eléctrico + UT BOSS → PM02 aunque Excel diga PF01", () => {
+    expect(
+      resolveCentroForAviso({
+        rawCentro: "PF01",
+        ut: "BOSS-BOS-ADM-CHALET",
+        especialidad: "ELECTRICO",
+        assetCentro: "PF01",
+        codigoEquipo: "EE-GRAL",
+      }),
+    ).toBe("PM02");
+  });
+
+  it("eléctrico + UT BOSS con código import E → PM02", () => {
+    expect(
+      resolveCentroForAviso({
+        rawCentro: "",
+        ut: "BOSS-BOS-ADM-ADMIN1",
+        especialidad: "E",
+      }),
+    ).toBe("PM02");
+  });
+
+  it("eléctrico + UT YPOR sigue en PF01", () => {
+    expect(
+      resolveCentroForAviso({
+        rawCentro: "PF01",
+        ut: "YPOR-YPO-GOF-VIVERO",
+        especialidad: "ELECTRICO",
+      }),
+    ).toBe("PF01");
+  });
 });

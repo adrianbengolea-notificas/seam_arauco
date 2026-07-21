@@ -326,6 +326,7 @@ function centroAvisoDesdeFila(
   assetId: string,
   lookup: Pick<UbicacionAssetLookup, "codigoNuevoByAssetId" | "centroByAssetId">,
   centroForzado?: string,
+  especialidad?: string | null,
 ): string {
   const codigoEquipo = assetId ? lookup.codigoNuevoByAssetId.get(assetId) : undefined;
   const assetCentro = assetId ? lookup.centroByAssetId.get(assetId) : undefined;
@@ -335,6 +336,7 @@ function centroAvisoDesdeFila(
     ut,
     codigoEquipo,
     assetCentro,
+    especialidad,
   });
 }
 
@@ -455,9 +457,9 @@ async function commitCalendarioMesesPreventivos(input: {
     const ut = (row.ubicacionTecnica ?? "").trim();
     let assetId = resolveAssetIdFromLookup(utToAsset, ut) ?? "";
     const espCode = defaultEspecialidadCode(row);
-    const cen = centroAvisoDesdeFila(row, ut, assetId, lookup, input.centroForzado);
+    const cen = centroAvisoDesdeFila(row, ut, assetId, lookup, input.centroForzado, espCode);
     assetId = assetIdImportDesdeEspecialidad(espCode, cen, assetId);
-    const centroObjetivo = centroAvisoDesdeFila(row, ut, assetId, lookup, input.centroForzado);
+    const centroObjetivo = centroAvisoDesdeFila(row, ut, assetId, lookup, input.centroForzado, espCode);
     const centroKey = centroObjetivo.trim();
     const tgt = normalizeNAvisoCompare(numero);
     const cands = [
@@ -596,11 +598,11 @@ export async function commitParsedAvisoRows(input: {
     let assetId = resolveAssetIdFromLookup(utToAsset, ut) ?? "";
     const espCode = defaultEspecialidadCode(row);
     let esp = especialidadImportToDominio(espCode);
-    const centroPrelim = centroAvisoDesdeFila(row, ut, assetId, lookup, input.centroForzado);
+    const centroPrelim = centroAvisoDesdeFila(row, ut, assetId, lookup, input.centroForzado, espCode);
     const denom = (row.denomUbicTecnica ?? "").trim();
 
     assetId = assetIdImportDesdeEspecialidad(espCode, centroPrelim, assetId);
-    const centro = centroAvisoDesdeFila(row, ut, assetId, lookup, input.centroForzado);
+    const centro = centroAvisoDesdeFila(row, ut, assetId, lookup, input.centroForzado, espCode);
 
     if (assetId) {
       const espExplicita = especialidadExplicitaDesdeTexto(descripcion);
@@ -771,9 +773,9 @@ async function commitListadoSemestralAnual(
     const freq = mtsaToFrecuencia(mtsa);
     const espCode = defaultEspecialidadCode(row);
     let esp = especialidadImportToDominio(espCode);
-    const centroPrelim = centroAvisoDesdeFila(row, ut, assetId, lookup, centroForzado);
+    const centroPrelim = centroAvisoDesdeFila(row, ut, assetId, lookup, centroForzado, espCode);
     assetId = assetIdImportDesdeEspecialidad(espCode, centroPrelim, assetId);
-    const centro = centroAvisoDesdeFila(row, ut, assetId, lookup, centroForzado);
+    const centro = centroAvisoDesdeFila(row, ut, assetId, lookup, centroForzado, espCode);
     if (assetId) {
       const espExplicita = especialidadExplicitaDesdeTexto(descripcion);
       esp = espExplicita ?? especialidadConPreferenciaCatalogoGg(assetId, esp, especialidadPredeterminadaByAssetId);

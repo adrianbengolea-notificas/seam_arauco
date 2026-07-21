@@ -1,6 +1,12 @@
 import { getAdminDb } from "@/firebase/firebaseAdmin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { AppError } from "@/lib/errors/app-error";
+import { syntheticEeAssetId } from "@/lib/assets/synthetic-gral-asset";
+import {
+  isEspecialidadElectrica,
+  isUtPrefijoBoss,
+  resolveCentroForAviso,
+} from "@/lib/firestore/derive-centro";
 import {
   limpiarAntecesorAlCerrarOrden,
   registrarAntecesorSupersedidoAlCerrarOrdenSucesora,
@@ -194,7 +200,21 @@ export async function createWorkOrderFromAviso(input: {
     const avisoNumero = nOtDesdeNumeroAviso(avisoFresh.n_aviso);
     n_ot = avisoNumero;
     const especialidadOt: Especialidad = asset?.especialidad_predeterminada ?? avisoFresh.especialidad;
-    const centroEfectivo = (asset?.centro?.trim() || avisoFresh.centro.trim()) || avisoFresh.centro;
+    const centroEfectivo = resolveCentroForAviso({
+      rawCentro: avisoFresh.centro,
+      ut: avisoFresh.ubicacion_tecnica ?? "",
+      codigoEquipo: asset?.codigo_nuevo,
+      assetCentro: asset?.centro,
+      especialidad: especialidadOt,
+    });
+    const assetIdEfectivo =
+      isEspecialidadElectrica(especialidadOt) && isUtPrefijoBoss(avisoFresh.ubicacion_tecnica ?? "")
+        ? syntheticEeAssetId(centroEfectivo)
+        : (asset?.id ?? "");
+    const codigoActivoEfectivo =
+      isEspecialidadElectrica(especialidadOt) && isUtPrefijoBoss(avisoFresh.ubicacion_tecnica ?? "")
+        ? "EE-GRAL"
+        : (asset?.codigo_nuevo ?? "");
 
     const fechaProg = (
       fechaInicioEfectiva !== undefined
@@ -207,8 +227,8 @@ export async function createWorkOrderFromAviso(input: {
       aviso_numero: avisoNumero,
       aviso_id: avisoFresh.id,
       archivada: false,
-      asset_id: asset?.id ?? "",
-      codigo_activo_snapshot: asset?.codigo_nuevo ?? "",
+      asset_id: assetIdEfectivo,
+      codigo_activo_snapshot: codigoActivoEfectivo,
       ubicacion_tecnica: avisoFresh.ubicacion_tecnica,
       centro: centroEfectivo,
       frecuencia: avisoFresh.frecuencia,
@@ -235,8 +255,16 @@ export async function createWorkOrderFromAviso(input: {
       work_order_id: woId,
       updated_at: FieldValue.serverTimestamp(),
     };
-    if (asset?.centro?.trim() && asset.centro.trim() !== avisoFresh.centro.trim()) {
-      avisoPatch.centro = asset.centro.trim();
+    if (centroEfectivo.trim() && centroEfectivo.trim() !== avisoFresh.centro.trim()) {
+      avisoPatch.centro = centroEfectivo.trim();
+    }
+    if (
+      isEspecialidadElectrica(especialidadOt) &&
+      isUtPrefijoBoss(avisoFresh.ubicacion_tecnica ?? "") &&
+      assetIdEfectivo &&
+      assetIdEfectivo !== (avisoFresh.asset_id ?? "").trim()
+    ) {
+      avisoPatch.asset_id = assetIdEfectivo;
     }
     if (!avisoFresh.clave_mantenimiento?.trim()) {
       avisoPatch.clave_mantenimiento = claveMantenimiento;

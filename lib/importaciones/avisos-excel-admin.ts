@@ -3,7 +3,7 @@
  * y `seed-sem-anual.ts`.
  */
 import { getAdminDb } from "@/firebase/firebaseAdmin";
-import { normalizeCentro } from "@/lib/firestore/derive-centro";
+import { resolveCentroForAviso } from "@/lib/firestore/derive-centro";
 import { ASSETS_COLLECTION, AVISOS_COLLECTION } from "@/lib/firestore/collections";
 import { ensurePlansForCentro } from "@/lib/plan-mantenimiento/admin";
 import type { Especialidad, EstadoAviso, FrecuenciaMantenimiento, TipoAviso } from "@/modules/notices/types";
@@ -317,7 +317,11 @@ export async function importarAvisosDesdeExcelBuffer(input: {
           n_aviso: numero,
           asset_id: assetId,
           ubicacion_tecnica: ut,
-          centro: normalizeCentro("", ut, codigoEq),
+          centro: resolveCentroForAviso({
+            ut,
+            codigoEquipo: codigoEq,
+            especialidad: mapEspecialidad(espRaw),
+          }),
           frecuencia: freq,
           tipo: "PREVENTIVO",
           especialidad: mapEspecialidad(espRaw),
@@ -428,7 +432,12 @@ export async function importarAvisosDesdeExcelBuffer(input: {
             const assetId = resolveAssetIdFromLookup(utToAsset, ut) ?? "";
             const rawCePl = iCePl !== undefined ? str(line[iCePl]).trim() : "";
             const codigoEqSa = assetId ? codigoNuevoByAssetId.get(assetId) : undefined;
-            const centro = normalizeCentro(rawCePl, ut, codigoEqSa);
+            const centro = resolveCentroForAviso({
+              rawCentro: rawCePl,
+              ut,
+              codigoEquipo: codigoEqSa,
+              especialidad: esp,
+            });
             const estadoPatch: Record<string, unknown> = {};
             if (iStatus !== undefined) {
               const u = normHeader(str(line[iStatus]));
@@ -552,7 +561,11 @@ export async function importarAvisosDesdeExcelBuffer(input: {
                 n_aviso: numero,
                 asset_id: assetId,
                 ubicacion_tecnica: ut,
-                centro: normalizeCentro("", ut, codigoEqCor),
+                centro: resolveCentroForAviso({
+                  ut,
+                  codigoEquipo: codigoEqCor,
+                  especialidad: mapEspecialidad(espRaw),
+                }),
                 frecuencia: "UNICA",
                 tipo: "CORRECTIVO",
                 especialidad: mapEspecialidad(espRaw),

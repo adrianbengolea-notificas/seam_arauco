@@ -70,7 +70,6 @@ function agruparSlots(slots: SlotSemanal[], centroPrograma?: string): GrupoLocal
 
   const grupos: GrupoLocalidad[] = [];
   for (const [loc, { mapEsp, slotRef }] of mapLoc) {
-    const etiqueta = etiquetaLocalidadExport(slotRef, centroPrograma);
     const especialidades = [];
     for (const [esp, mapDia] of mapEsp) {
       const porDia = {} as Record<DiaExport, string>;
@@ -79,6 +78,14 @@ function agruparSlots(slots: SlotSemanal[], centroPrograma?: string): GrupoLocal
       }
       especialidades.push({ especialidad: esp, porDia });
     }
+    // Etiqueta por especialidad dominante: si hay Electrico en UT BOSS, prioriza esa regla de planta
+    const espParaEtiqueta =
+      especialidades.find((e) => /electr/i.test(e.especialidad))?.especialidad ??
+      especialidades[0]?.especialidad;
+    const etiqueta = etiquetaLocalidadExport(
+      { ...slotRef, especialidad: espParaEtiqueta },
+      centroPrograma,
+    );
     grupos.push({ localidad: loc, etiqueta, especialidades });
   }
 

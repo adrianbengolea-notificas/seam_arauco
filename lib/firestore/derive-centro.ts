@@ -52,6 +52,25 @@ export function deriveCentroFromEquipmentCode(codigo: string): string | null {
   return null;
 }
 
+/** Prefijo de sitio Bossetti en UT SAP (`BOSS-…` / `BOS-…`). */
+export function isUtPrefijoBoss(ut: string): boolean {
+  const first = ut.trim().split(/[-_/]/)[0]?.toUpperCase() ?? "";
+  return first === "BOSS" || first === "BOS";
+}
+
+/**
+ * Eléctrico (dominio o código de import `E`).
+ * No incluye HG: el import de HG no usa activo sintético `ee-gral-*`.
+ */
+export function isEspecialidadElectrica(esp?: string | null): boolean {
+  const n = (esp ?? "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+  return n === "ELECTRICO" || n === "E" || n === "EL";
+}
+
 /**
  * Normaliza un código de centro para importación:
  * 1. Si `raw` ya es un centro reconocido (en KNOWN_CENTROS), lo usa.
@@ -75,10 +94,12 @@ export function normalizeCentro(raw: string, ut: string, codigo?: string): strin
 /**
  * Resuelve el centro de un aviso con prioridad:
  * 1. `centroForzado` (importación manual / script).
- * 2. `centro` del activo vinculado en maestros (fuente de verdad operativa).
- * 3. `normalizeCentro` (código SAP del equipo, luego prefijo UT).
+ * 2. Eléctrico + UT Bossetti → **PM02** (planta Bossetti), aunque el Excel diga PF01
+ *    o el fallback UT sea Predio Forestal. Solo cede ante código de equipo explícito.
+ * 3. `centro` del activo vinculado en maestros (fuente de verdad operativa).
+ * 4. `normalizeCentro` (código SAP del equipo, luego prefijo UT).
  *
- * Evita clasificar equipos PM02* en PF01 solo porque la UT empieza con BOSS-.
+ * Evita clasificar equipos PM02* / preventivos eléctricos BOSS en PF01.
  */
 export function resolveCentroForAviso(input: {
   rawCentro?: string;
@@ -86,9 +107,20 @@ export function resolveCentroForAviso(input: {
   codigoEquipo?: string;
   assetCentro?: string;
   centroForzado?: string;
+  /** Dominio (`ELECTRICO`) o código de import (`E`). */
+  especialidad?: string | null;
 }): string {
   const forzado = input.centroForzado?.trim();
   if (forzado && isPlantCentroCode(forzado)) return forzado;
+
+  if (isEspecialidadElectrica(input.especialidad) && isUtPrefijoBoss(input.ut)) {
+    const fromCode = input.codigoEquipo?.trim()
+      ? deriveCentroFromEquipmentCode(input.codigoEquipo)
+      : null;
+    if (fromCode) return fromCode;
+    return "PM02";
+  }
+
   const ac = input.assetCentro?.trim();
   if (ac && isPlantCentroCode(ac)) return ac;
   return normalizeCentro(input.rawCentro ?? "", input.ut, input.codigoEquipo);

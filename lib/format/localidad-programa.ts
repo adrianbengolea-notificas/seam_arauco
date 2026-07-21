@@ -1,4 +1,5 @@
 import { CENTRO_SELECTOR_TODAS_PLANTAS, KNOWN_CENTROS } from "@/lib/config/app-config";
+import { isEspecialidadElectrica, isUtPrefijoBoss } from "@/lib/firestore/derive-centro";
 
 /**
  * Etiqueta legible para filas de localidad en el programa semanal cuando solo hay código SAP/path.
@@ -187,9 +188,13 @@ type SlotLocalidadExport = {
 /**
  * Columna «Localidad» del Excel del programa: SECO en mayúsculas (fusión multi-planta) + códigos UT.
  * No usa `denomUbicTecnica` (descripción SAP). Si falta UT, devuelve solo el SECO.
+ *
+ * Para UT Bossetti (`BOSS-*`): si el SECO del programa/fusión sería PF01 (Predio Forestal)
+ * pero la fila es eléctrica, se muestra PM02 (planta Bossetti) — misma regla operativa
+ * que `resolveCentroForAviso` con especialidad ELECTRICO.
  */
 export function etiquetaLocalidadExport(
-  slot: SlotLocalidadExport,
+  slot: SlotLocalidadExport & { especialidad?: string | null },
   centroPrograma?: string | null,
 ): string {
   const locGrid = slot.localidad?.trim() || "—";
@@ -209,7 +214,12 @@ export function etiquetaLocalidadExport(
 
   const utFmt = formatearUbicacionTecnicaExport(utRaw);
   const esFusion = Boolean(centroFusion || slot.programaOrigenDocId?.trim());
-  const seco = centroFusion ?? centro;
+  let seco = centroFusion ?? centro;
+
+  const utParaRegla = slot.localidadDocPrograma?.trim() || locGrid;
+  if (seco === "PF01" && isUtPrefijoBoss(utParaRegla) && isEspecialidadElectrica(slot.especialidad)) {
+    seco = "PM02";
+  }
 
   if (utFmt && utFmt !== "—") {
     return esFusion && seco ? `${seco} · ${utFmt}` : utFmt;
